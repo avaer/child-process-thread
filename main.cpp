@@ -16,12 +16,36 @@ using namespace std;
 #define JS_FLOAT(val) Nan::New<v8::Number>(val)
 #define JS_BOOL(val) Nan::New<v8::Boolean>(val)
 
-/* #define READ 0
-#define WRITE 1 */
-
-#include <iostream>
-
 namespace childProcessThread {
+
+uv_key_t liveKey;
+int liveKeyTrue = 1;
+int liveKeyFalse = 0;
+
+class Thread : public Nan::ObjectWrap {
+public:
+  static Handle<Object> Initialize();
+  char *getJsPathString();
+  pthread_t &getThread();
+  uv_loop_t &getLoop();
+  uv_async_t &getAsync();
+  static bool getLive();
+  static void setLive(bool live);
+
+protected:
+  Thread(const char *src, size_t length);
+  ~Thread();
+  static NAN_METHOD(New);
+  static NAN_METHOD(Fork);
+  static NAN_METHOD(Terminate);
+  static NAN_METHOD(Cancel);
+
+private:
+  uv_async_t async; // must be first to allow casting to Thread *
+  unique_ptr<char []> jsPathString;
+  uv_loop_t loop;
+  pthread_t thread;
+};
 
 /* static Mutex node_isolate_mutex;
 static v8::Isolate *node_isolate; */
@@ -33,9 +57,11 @@ static v8::Isolate *node_isolate; */
          !env->inside_should_not_abort_on_uncaught_scope();
 } */
 
-inline int Start(uv_loop_t* event_loop, Isolate* isolate, IsolateData* isolate_data,
-                 int argc, const char* const* argv,
-                 int exec_argc, const char* const* exec_argv) {
+inline int Start(
+  Thread *thread, Isolate* isolate, IsolateData* isolate_data,
+  int argc, const char* const* argv,
+  int exec_argc, const char* const* exec_argv
+) {
   HandleScope handle_scope(isolate);
   Local<Context> context = Context::New(isolate);
   // Local<Context> context = NewContext(isolate);
@@ -72,24 +98,29 @@ inline int Start(uv_loop_t* event_loop, Isolate* isolate, IsolateData* isolate_d
 
   env->set_trace_sync_io(trace_sync_io); */
 
+
   {
     SealHandleScope seal(isolate);
     bool more;
-    // PERFORMANCE_MARK(&env, LOOP_START);
+    // PERFORMANCE_MARK(&env, LOOP_START)
+
+    Thread::setLive(true);
+
     do {
-      uv_run(event_loop, UV_RUN_DEFAULT);
+      uv_run(&thread->getLoop(), UV_RUN_ONCE);
 
       // v8_platform.DrainVMTasks(isolate);
 
-      more = uv_loop_alive(event_loop);
-      if (more)
+      more = uv_loop_alive(&thread->getLoop()) && Thread::getLive();
+      /* if (more) {
         continue;
+      } */
 
       // EmitBeforeExit(env);
 
       // Emit `beforeExit` if the loop became alive either after emitting
       // event, or after running some callbacks.
-      more = uv_loop_alive(event_loop);
+      // more = uv_loop_alive(&thread->getLoop());
     } while (more == true);
     // PERFORMANCE_MARK(&env, LOOP_EXIT);
   }
@@ -112,9 +143,10 @@ inline int Start(uv_loop_t* event_loop, Isolate* isolate, IsolateData* isolate_d
   return 0;
 }
 
-inline int Start(uv_loop_t* event_loop,
-                 int argc, const char* const* argv,
-                 int exec_argc, const char* const* exec_argv) {
+inline int Start(Thread *thread,
+  int argc, const char* const* argv,
+  int exec_argc, const char* const* exec_argv
+) {
   Isolate::CreateParams params;
   unique_ptr<ArrayBuffer::Allocator> allocator(ArrayBuffer::Allocator::NewDefaultAllocator());
   params.array_buffer_allocator = allocator.get();
@@ -142,7 +174,7 @@ inline int Start(uv_loop_t* event_loop,
     Locker locker(isolate);
     Isolate::Scope isolate_scope(isolate);
     HandleScope handle_scope(isolate);
-    IsolateData *isolate_data = CreateIsolateData(isolate, event_loop);
+    IsolateData *isolate_data = CreateIsolateData(isolate, &thread->getLoop());
     /* IsolateData isolate_data(
         isolate,
         event_loop,
@@ -152,7 +184,7 @@ inline int Start(uv_loop_t* event_loop,
     if (track_heap_objects) {
       isolate->GetHeapProfiler()->StartTrackingHeapObjects(true);
     } */
-    exit_code = Start(event_loop, isolate, isolate_data, argc, argv, exec_argc, exec_argv);
+    exit_code = Start(thread, isolate, isolate_data, argc, argv, exec_argc, exec_argv);
 
     FreeIsolateData(isolate_data);
   }
@@ -168,11 +200,11 @@ inline int Start(uv_loop_t* event_loop,
   return exit_code;
 }
 
-void *threadFn(void *arg) {
-  unique_ptr<char[]> jsPathString((char*)arg);
+static void *threadFn(void *arg) {
+  pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, nullptr);
+  pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, nullptr);
 
-  uv_loop_t loop;
-  uv_loop_init(&loop);
+  Thread *thread = (Thread *)arg;
 
   char argsString[4096];
   int i = 0;
@@ -183,36 +215,125 @@ void *threadFn(void *arg) {
   i += strlen(binPathString) + 1;
 
   char *jsPathArg = argsString + i;
-  strncpy(jsPathArg, jsPathString.get(), sizeof(argsString) - i);
-  i += strlen(jsPathString.get()) + 1;
+  strncpy(jsPathArg, thread->getJsPathString(), sizeof(argsString) - i);
+  i += strlen(thread->getJsPathString()) + 1;
 
   char *argv[] = {binPathArg, jsPathArg};
   int argc = sizeof(argv)/sizeof(argv[0]);
-  Start(&loop, argc, argv, argc, argv);
+  int retval = Start(thread, argc, argv, argc, argv);
 
-  return nullptr;
+  return new int(retval);
+}
+void asyncCb(uv_async_t *handle) {
+  std::cout << "async cb" << "\n";
+
+  Thread::setLive(false);
 }
 
-static NAN_METHOD(Fork) {
+Handle<Object> Thread::Initialize() {
+  Nan::EscapableHandleScope scope;
+
+  // constructor
+  Local<FunctionTemplate> ctor = Nan::New<FunctionTemplate>(New);
+  ctor->InstanceTemplate()->SetInternalFieldCount(1);
+  ctor->SetClassName(JS_STR("Thread"));
+  Nan::SetPrototypeMethod(ctor, "terminate", Thread::Terminate);
+  Nan::SetPrototypeMethod(ctor, "cancel", Thread::Cancel);
+
+  Local<Function> ctorFn = ctor->GetFunction();
+
+  Local<Function> forkFn = Nan::New<Function>(Thread::Fork);
+  forkFn->Set(JS_STR("Thread"), ctorFn);
+  ctorFn->Set(JS_STR("fork"), forkFn);
+
+  return scope.Escape(ctorFn);
+}
+char *Thread::getJsPathString() {
+  return jsPathString.get();
+}
+pthread_t &Thread::getThread() {
+  return thread;
+}
+uv_loop_t &Thread::getLoop() {
+  return loop;
+}
+uv_async_t &Thread::getAsync() {
+  return async;
+}
+bool Thread::getLive() {
+  return (*(int *)uv_key_get(&liveKey)) == 1;
+}
+void Thread::setLive(bool live) {
+  uv_key_set(&liveKey, live ? &liveKeyTrue : &liveKeyFalse);
+}
+Thread::Thread(const char *src, size_t length) {
+  char *data = new char[length + 1];
+  memcpy(data, src, length);
+  data[length] = 0;
+  jsPathString = unique_ptr<char[]>(data);
+
+  uv_loop_init(&loop);
+  uv_async_init(&loop, &async, asyncCb);
+
+  pthread_create(&thread, nullptr, threadFn, this);
+}
+Thread::~Thread() {
+  uv_close((uv_handle_t *)&async, nullptr);
+  uv_close((uv_handle_t *)&loop, nullptr);
+}
+NAN_METHOD(Thread::New) {
+  Nan::HandleScope scope;
+
   if (info[0]->IsString()) {
+    Local<Object> rawThreadObj = info.This();
+
     Local<String> jsPathValue = info[0]->ToString();
     String::Utf8Value jsPathValueUtf8(jsPathValue);
     size_t length = jsPathValueUtf8.length();
-    char *data = new char[length + 1];
-    memcpy(data, *jsPathValueUtf8, length);
-    data[length] = 0;
 
-    std::cout << "fork data 1 " << data << "\n";
+    Thread *thread = new Thread(*jsPathValueUtf8, length);
+    thread->Wrap(rawThreadObj);
 
-    pthread_t thread;
-    pthread_create(&thread, nullptr, threadFn, data);
+    info.GetReturnValue().Set(rawThreadObj);
+  } else {
+    return Nan::ThrowError("Invalid arguments");
+  }
+}
+NAN_METHOD(Thread::Fork) {
+  if (info[0]->IsString()) {
+    Local<Function> threadConstructor = Local<Function>::Cast(info.Callee()->Get(JS_STR("Thread")));
+    Local<Value> argv[] = {
+      info[0],
+    };
+    Local<Value> threadObj = threadConstructor->NewInstance(sizeof(argv)/sizeof(argv[0]), argv);
+
+    info.GetReturnValue().Set(threadObj);
   } else {
     Nan::ThrowError("Invalid arguments");
   }
 }
+NAN_METHOD(Thread::Terminate) {
+  Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
+
+  uv_async_send(&thread->getAsync());
+
+  void *retval;
+  int result = pthread_join(thread->getThread(), &retval);
+
+  info.GetReturnValue().Set(Nan::New<Integer>(result == 0 ? (*(int *)retval) : 1));
+}
+NAN_METHOD(Thread::Cancel) {
+  Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
+
+  pthread_cancel(thread->getThread());
+
+  pthread_join(thread->getThread(), nullptr);
+}
 
 void Init(Handle<Object> exports) {
-  exports->Set(JS_STR("fork"), Nan::New<Function>(Fork));
+  uv_key_create(&liveKey);
+
+  exports->Set(JS_STR("Thread"), Thread::Initialize());
 }
 
 NODE_MODULE(NODE_GYP_MODULE_NAME, Init)

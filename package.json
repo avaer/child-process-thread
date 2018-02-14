@@ -3,7 +3,9 @@
   "version": "0.0.1",
   "description": "Child process in a thread for node",
   "main": "index.js",
-  "dependencies": {},
+  "dependencies": {
+    "nan": "^2.8.0"
+  },
   "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
