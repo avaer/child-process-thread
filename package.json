@@ -1,0 +1,23 @@
+{
+  "name": "child-process-thread",
+  "version": "0.0.1",
+  "description": "Child process in a thread for node",
+  "main": "index.js",
+  "dependencies": {},
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "install": "node-gyp rebuild"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/modulesio/child-process-thread.git"
+  },
+  "author": "Avaer Kazmer <a@modules.io>",
+  "license": "ISC",
+  "gypfile": true,
+  "bugs": {
+    "url": "https://github.com/modulesio/child-process-thread/issues"
+  },
+  "homepage": "https://github.com/modulesio/child-process-thread#readme"
+}
