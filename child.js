@@ -14,8 +14,8 @@ onthreadmessage = arrayBuffer => {
   }
 };
 onmessage = null;
-postMessage = (m, transferList) => {
-  const arrayBuffer = smiggles.serialize(m, transferList);
+postMessage = function(m, transferList, arrayBuffer) {
+  arrayBuffer = smiggles.serialize(m, transferList, arrayBuffer);
   new RawBuffer(arrayBuffer).toAddress(); // externalize
   postThreadMessage(arrayBuffer);
 };

@@ -10,8 +10,8 @@ Thread.fork = (fork => function(jsPath, imports = {}) {
   return fork.call(this, jsPath, imports);
 })(Thread.fork);
 Thread.setChildJsPath(path.join(__dirname, 'child.js'));
-Thread.prototype.postMessage = function(m, arrayBuffer) {
-  arrayBuffer = smiggles.serialize(m, arrayBuffer);
+Thread.prototype.postMessage = function(m, transferList, arrayBuffer) {
+  arrayBuffer = smiggles.serialize(m, transferList, arrayBuffer);
   new RawBuffer(arrayBuffer).toAddress(); // externalize
   this.postThreadMessage(arrayBuffer);
 };
