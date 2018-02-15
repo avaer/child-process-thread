@@ -3,8 +3,6 @@ const childProcessThread = require('.');
 const RawBuffer = require('raw-buffer');
 const smiggles = require('smiggles');
 
-childProcessThread.bind({RawBuffer});
-
 console.log('lol 0');
 
 t1 = childProcessThread.fork(path.join(__dirname, 'example-worker1.js'));

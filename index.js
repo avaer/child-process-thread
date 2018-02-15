@@ -3,6 +3,8 @@ const {Thread} = require(path.join(__dirname, 'build', 'Release', 'child_process
 const RawBuffer = require('raw-buffer');
 const smiggles = require('smiggles');
 
+smiggles.bind({RawBuffer});
+
 const rawBufferSymbol = Symbol();
 
 Thread.fork = (fork => function(jsPath, imports = {}) {
