@@ -12,11 +12,21 @@ Thread.prototype.postMessage = function(m, arrayBuffer) {
   this.postThreadMessage(arrayBuffer);
 };
 Thread.prototype.pollMessages = function() {
-  const ms = this.pollThreadMessages();
-  if (ms) {
-    for (let i = 0; i < ms.length; i++) {
-      const m = ms[i];
-      m[rawBufferSymbol] = new RawBuffer(m); // internalize
+  let ms;
+
+  const arrayBuffers = this.pollThreadMessages();
+  if (arrayBuffers) {
+    ms = Array(arrayBuffers.length);
+
+    for (let i = 0; i < arrayBuffers.length; i++) {
+      const arrayBuffer = arrayBuffers[i];
+      const m = smiggles.deserialize(arrayBuffer);
+      ms[i] = m;
+
+      const rawBuffer = new RawBuffer(arrayBuffer); // internalize
+      if (typeof m === 'object' && m !== null) {
+        m[rawBufferSymbol] = rawBuffer; // bind storage lifetime
+      }
     }
   }
   return ms;

@@ -6,10 +6,13 @@ smiggles.bind({RawBuffer});
 const rawBufferSymbol = Symbol();
 
 onthreadmessage = arrayBuffer => {
-  arrayBuffer[rawBufferSymbol] = new RawBuffer(arrayBuffer); // internalize
+  const rawBuffer = new RawBuffer(arrayBuffer); // internalize
 
   if (onmessage !== null) {
     const m = smiggles.deserialize(arrayBuffer);
+    if (typeof m === 'object' && m !== null) {
+      m[rawBufferSymbol] = rawBuffer; // bind storage lifetime
+    }
     onmessage(m);
   }
 };
@@ -21,7 +24,5 @@ postMessage = (m, transferList) => {
 };
 
 // user code
-
-console.log('booting', process.argv[2]);
 
 require(process.argv[2]);
