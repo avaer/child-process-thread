@@ -1,6 +1,8 @@
 const {RawBuffer: {RawBuffer}} = imports;
 const smiggles = require('smiggles');
 
+smiggles.bind({RawBuffer});
+
 console.log('lol 1', RawBuffer);
 
 onthreadmessage = arrayBuffer => {
