@@ -54,7 +54,7 @@ protected:
   static NAN_METHOD(Fork);
   static NAN_METHOD(Terminate);
   static NAN_METHOD(Cancel);
-  static NAN_METHOD(PostMessage);
+  static NAN_METHOD(PostThreadMessage);
 
 private:
   string jsPath;
@@ -311,7 +311,7 @@ Handle<Object> Thread::Initialize() {
   ctor->SetClassName(JS_STR("Thread"));
   Nan::SetPrototypeMethod(ctor, "terminate", Thread::Terminate);
   Nan::SetPrototypeMethod(ctor, "cancel", Thread::Cancel);
-  Nan::SetPrototypeMethod(ctor, "postMessage", Thread::PostMessage);
+  Nan::SetPrototypeMethod(ctor, "postThreadMessage", Thread::PostThreadMessage);
 
   Local<Function> ctorFn = ctor->GetFunction();
 
@@ -457,7 +457,7 @@ NAN_METHOD(Thread::Cancel) {
 
   pthread_join(thread->getThread(), nullptr);
 }
-NAN_METHOD(Thread::PostMessage) {
+NAN_METHOD(Thread::PostThreadMessage) {
   Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
 
   if (info[0]->IsArrayBuffer()) {
