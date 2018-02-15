@@ -233,7 +233,7 @@ inline int Start(Thread *thread,
 
   // isolate->AddMessageListener(OnMessage);
   // isolate->SetAbortOnUncaughtExceptionCallback(ShouldAbortOnUncaughtException);
-  isolate->SetAutorunMicrotasks(false);
+  // isolate->SetAutorunMicrotasks(false);
   // isolate->SetFatalErrorHandler(OnFatalError);
 
   /* {
