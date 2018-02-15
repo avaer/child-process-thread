@@ -42,6 +42,7 @@ public:
   void pushMessageOut(const QueueEntry &queueEntry);
   queue<QueueEntry> getMessageQueueIn();
   queue<QueueEntry> getMessageQueueOut();
+  static void setChildJsPath(const string &childJsPath);
   static Thread *getCurrentThread();
   static void setCurrentThread(Thread *thread);
   void setGlobal(Local<Object> global);
@@ -53,6 +54,7 @@ public:
   ~Thread();
   static NAN_METHOD(New);
   static NAN_METHOD(Fork);
+  static NAN_METHOD(SetChildJsPath);
   static NAN_METHOD(Terminate);
   static NAN_METHOD(Cancel);
   static NAN_METHOD(PostThreadMessageIn);
@@ -60,6 +62,8 @@ public:
   static NAN_METHOD(PollThreadMessagesOut);
 
 private:
+  static string childJsPath;
+
   string jsPath;
   vector<pair<string, uintptr_t>> imports;
   uv_loop_t loop;
@@ -323,6 +327,7 @@ Handle<Object> Thread::Initialize() {
   Local<Function> forkFn = Nan::New<Function>(Thread::Fork);
   forkFn->Set(JS_STR("Thread"), ctorFn);
   ctorFn->Set(JS_STR("fork"), forkFn);
+  ctorFn->Set(JS_STR("setChildJsPath"), Nan::New<Function>(Thread::SetChildJsPath));
 
   return scope.Escape(ctorFn);
 }
@@ -381,6 +386,9 @@ queue<QueueEntry> Thread::getMessageQueueOut() {
   uv_mutex_unlock(&mutex);
 
   return result;
+}
+void Thread::setChildJsPath(const string &childJsPath) {
+  Thread::childJsPath = childJsPath;
 }
 Thread *Thread::getCurrentThread() {
   return (Thread *)uv_key_get(&threadKey);
@@ -464,6 +472,18 @@ NAN_METHOD(Thread::Fork) {
     Nan::ThrowError("Invalid arguments");
   }
 }
+NAN_METHOD(Thread::SetChildJsPath) {
+  if (info[0]->IsString()) {
+    Local<String> childJsPathValue = Local<String>::Cast(info[0]);
+    String::Utf8Value childJsPathValueUtf8(info[0]);
+    size_t length = childJsPathValueUtf8.length();
+    string childJsPath(*childJsPathValueUtf8, length);
+
+    Thread::setChildJsPath(childJsPath);
+  } else {
+    Nan::ThrowError("Invalid arguments");
+  }
+}
 NAN_METHOD(Thread::Terminate) {
   Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
 
@@ -540,6 +560,7 @@ void Init(Handle<Object> exports) {
 
   exports->Set(JS_STR("Thread"), Thread::Initialize());
 }
+string Thread::childJsPath;
 
 NODE_MODULE(NODE_GYP_MODULE_NAME, Init)
 

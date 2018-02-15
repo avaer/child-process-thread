@@ -20,14 +20,11 @@ t1.postMessage(o);
 
 immediate = null;
 _recurse = () => {
-  const arrayBuffers = t1.pollThreadMessages();
-  if (arrayBuffers) {
-    for (let i = 0; i < arrayBuffers.length; i++) {
-      const arrayBuffer = arrayBuffers[i];
-      const m = smiggles.deserialize(arrayBuffer);
+  const ms = t1.pollMessages();
+  if (ms) {
+    for (let i = 0; i < ms.length; i++) {
+      const m = ms[i];
       console.log('got main thread message', m);
-
-      new RawBuffer(arrayBuffer).destroy();
     }
   } else {
     immediate = setImmediate(_recurse);

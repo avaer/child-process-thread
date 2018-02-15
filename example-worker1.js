@@ -3,20 +3,30 @@ const smiggles = require('smiggles');
 
 smiggles.bind({RawBuffer});
 
-console.log('lol 1', RawBuffer);
+const rawBufferSymbol = Symbol();
 
 onthreadmessage = arrayBuffer => {
-  const m = smiggles.deserialize(arrayBuffer);
-  console.log('got thread message', m);
+  arrayBuffer[rawBufferSymbol] = new RawBuffer(arrayBuffer); // internalize
 
-  const arrayBuffer2 = smiggles.serialize(m);
-  new RawBuffer(arrayBuffer2); // externalize
-
-  new RawBuffer(arrayBuffer).destroy();
-
-  postThreadMessage(arrayBuffer2);
+  if (onmessage !== null) {
+    const m = smiggles.deserialize(arrayBuffer);
+    onmessage(m);
+  }
+};
+onmessage = null;
+postMessage = (m, transferList) => {
+  const arrayBuffer = smiggles.serialize(m, transferList);
+  new RawBuffer(arrayBuffer); // externalize
+  postThreadMessage(arrayBuffer);
 };
 
+// user code
+
+console.log('lol 1', RawBuffer);
+onmessage = m => {
+  console.log('got thread message', m);
+  postMessage(m);
+};
 setTimeout(() => {
   console.log('lol 2');
 }, 100);
