@@ -18,9 +18,16 @@ using namespace std;
 
 namespace childProcessThread {
 
-uv_key_t liveKey;
-int liveKeyTrue = 1;
-int liveKeyFalse = 0;
+uv_key_t threadKey;
+
+class QueueEntry {
+public:
+  QueueEntry(uintptr_t address, size_t size) : address(address), size(size) {}
+  QueueEntry(const QueueEntry &queueEntry) : address(queueEntry.address), size(queueEntry.size) {}
+
+  uintptr_t address;
+  size_t size;
+};
 
 class Thread : public Nan::ObjectWrap {
 public:
@@ -28,9 +35,15 @@ public:
   char *getJsPathString();
   pthread_t &getThread();
   uv_loop_t &getLoop();
-  uv_async_t &getAsync();
-  static bool getLive();
-  static void setLive(bool live);
+  uv_async_t &getExitAsync();
+  uv_mutex_t &getMutex();
+  void pushMessage(const QueueEntry &queueEntry);
+  QueueEntry popMessage();
+  size_t getNumMessages() const;
+  static Thread *getCurrentThread();
+  static void setCurrentThread(Thread *thread);
+  bool getLive() const;
+  void setLive(bool live);
 
 protected:
   Thread(const char *src, size_t length);
@@ -39,12 +52,18 @@ protected:
   static NAN_METHOD(Fork);
   static NAN_METHOD(Terminate);
   static NAN_METHOD(Cancel);
+  static NAN_METHOD(PostMessage);
+  static NAN_METHOD(PopMessage);
 
 private:
-  uv_async_t async; // must be first to allow casting to Thread *
   unique_ptr<char []> jsPathString;
   uv_loop_t loop;
+  uv_async_t exitAsync;
+  uv_mutex_t mutex;
+  uv_async_t messageAsync;
   pthread_t thread;
+  queue<QueueEntry> messageQueue;
+  bool live;
 };
 
 /* static Mutex node_isolate_mutex;
@@ -104,14 +123,14 @@ inline int Start(
     bool more;
     // PERFORMANCE_MARK(&env, LOOP_START)
 
-    Thread::setLive(true);
+    thread->setLive(true);
 
     do {
       uv_run(&thread->getLoop(), UV_RUN_ONCE);
 
       // v8_platform.DrainVMTasks(isolate);
 
-      more = uv_loop_alive(&thread->getLoop()) && Thread::getLive();
+      more = uv_loop_alive(&thread->getLoop()) && thread->getLive();
       /* if (more) {
         continue;
       } */
@@ -205,6 +224,7 @@ static void *threadFn(void *arg) {
   pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, nullptr);
 
   Thread *thread = (Thread *)arg;
+  Thread::setCurrentThread(thread);
 
   char argsString[4096];
   int i = 0;
@@ -224,10 +244,15 @@ static void *threadFn(void *arg) {
 
   return new int(retval);
 }
-void asyncCb(uv_async_t *handle) {
-  std::cout << "async cb" << "\n";
-
-  Thread::setLive(false);
+void exitAsyncCb(uv_async_t *handle) {
+  Thread *thread = Thread::getCurrentThread();
+  thread->setLive(false);
+}
+void messageAsyncCb(uv_async_t *handle) {
+  /* Local<Array> result = Nan::New<Array>(2); // XXX
+  result->Set(0, Nan::New<Number>(*reinterpret_cast<double*>(&address)));
+  result->Set(1, Nan::New<Number>(*reinterpret_cast<double*>(&size)));
+  return result; */
 }
 
 Handle<Object> Thread::Initialize() {
@@ -239,6 +264,8 @@ Handle<Object> Thread::Initialize() {
   ctor->SetClassName(JS_STR("Thread"));
   Nan::SetPrototypeMethod(ctor, "terminate", Thread::Terminate);
   Nan::SetPrototypeMethod(ctor, "cancel", Thread::Cancel);
+  Nan::SetPrototypeMethod(ctor, "postMessage", Thread::PostMessage);
+  Nan::SetPrototypeMethod(ctor, "popMessage", Thread::PopMessage);
 
   Local<Function> ctorFn = ctor->GetFunction();
 
@@ -257,14 +284,43 @@ pthread_t &Thread::getThread() {
 uv_loop_t &Thread::getLoop() {
   return loop;
 }
-uv_async_t &Thread::getAsync() {
-  return async;
+uv_async_t &Thread::getExitAsync() {
+  return exitAsync;
 }
-bool Thread::getLive() {
-  return (*(int *)uv_key_get(&liveKey)) == 1;
+uv_mutex_t &Thread::getMutex() {
+  return mutex;
+}
+void Thread::pushMessage(const QueueEntry &queueEntry) {
+  uv_mutex_lock(&mutex);
+
+  messageQueue.push(queueEntry);
+
+  uv_mutex_unlock(&mutex);
+}
+QueueEntry Thread::popMessage() {
+  uv_mutex_lock(&mutex);
+
+  const QueueEntry &result = messageQueue.back();
+  messageQueue.pop();
+
+  uv_mutex_unlock(&mutex);
+
+  return result;
+}
+size_t Thread::getNumMessages() const {
+  size_t result = messageQueue.size();
+}
+Thread *Thread::getCurrentThread() {
+  return (Thread *)uv_key_get(&threadKey);
+}
+void Thread::setCurrentThread(Thread *thread) {
+  uv_key_set(&threadKey, thread);
+}
+bool Thread::getLive() const {
+  return live;
 }
 void Thread::setLive(bool live) {
-  uv_key_set(&liveKey, live ? &liveKeyTrue : &liveKeyFalse);
+  this->live = live;
 }
 Thread::Thread(const char *src, size_t length) {
   char *data = new char[length + 1];
@@ -273,12 +329,17 @@ Thread::Thread(const char *src, size_t length) {
   jsPathString = unique_ptr<char[]>(data);
 
   uv_loop_init(&loop);
-  uv_async_init(&loop, &async, asyncCb);
+  uv_async_init(&loop, &exitAsync, exitAsyncCb);
+  uv_mutex_init(&mutex);
+  uv_async_init(&loop, &messageAsync, messageAsyncCb);
+
+  live = true;
 
   pthread_create(&thread, nullptr, threadFn, this);
 }
 Thread::~Thread() {
-  uv_close((uv_handle_t *)&async, nullptr);
+  uv_close((uv_handle_t *)&exitAsync, nullptr);
+  uv_close((uv_handle_t *)&messageAsync, nullptr);
   uv_close((uv_handle_t *)&loop, nullptr);
 }
 NAN_METHOD(Thread::New) {
@@ -315,7 +376,7 @@ NAN_METHOD(Thread::Fork) {
 NAN_METHOD(Thread::Terminate) {
   Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
 
-  uv_async_send(&thread->getAsync());
+  uv_async_send(&thread->getExitAsync());
 
   void *retval;
   int result = pthread_join(thread->getThread(), &retval);
@@ -329,9 +390,36 @@ NAN_METHOD(Thread::Cancel) {
 
   pthread_join(thread->getThread(), nullptr);
 }
+NAN_METHOD(Thread::PostMessage) {
+  Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
+
+  if (info[0]->IsArrayBuffer()) {
+    Local<ArrayBuffer> arrayBuffer = Local<ArrayBuffer>::Cast(info[0]);
+    QueueEntry queueEntry((uintptr_t)arrayBuffer->GetContents().Data(), arrayBuffer->ByteLength());
+
+    thread->pushMessage(queueEntry);
+  } else {
+    return Nan::ThrowError("invalid arguments");
+  }
+}
+NAN_METHOD(Thread::PopMessage) {
+  Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
+
+  uv_mutex_lock(&thread->getMutex());
+
+  const QueueEntry &queueEntry = thread->popMessage();
+
+  uv_mutex_unlock(&thread->getMutex());
+
+  char *data = (char *)queueEntry.address;
+  size_t size = queueEntry.size;
+  Local<ArrayBuffer> result = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
+
+  info.GetReturnValue().Set(result);
+}
 
 void Init(Handle<Object> exports) {
-  uv_key_create(&liveKey);
+  uv_key_create(&threadKey);
 
   exports->Set(JS_STR("Thread"), Thread::Initialize());
 }
