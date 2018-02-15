@@ -16,8 +16,6 @@ Thread.prototype.postMessage = function(m, arrayBuffer) {
   this.postThreadMessage(arrayBuffer);
 };
 Thread.prototype.onthreadmessage = function(arrayBuffer) {
-  console.log('got thread message', arrayBuffer.byteLength, typeof this.onmessage);
-
   arrayBuffer[rawBufferSymbol] = new RawBuffer(arrayBuffer); // internalize
 
   if (this.onmessage) {
