@@ -38,10 +38,11 @@ public:
   uv_async_t &getExitAsync();
   uv_mutex_t &getMutex();
   void pushMessage(const QueueEntry &queueEntry);
-  QueueEntry popMessage();
-  size_t getNumMessages() const;
+  queue<QueueEntry> getMessageQueue();
   static Thread *getCurrentThread();
   static void setCurrentThread(Thread *thread);
+  void setGlobal(Local<Object> global);
+  Local<Object> getGlobal();
   bool getLive() const;
   void setLive(bool live);
 
@@ -53,7 +54,6 @@ protected:
   static NAN_METHOD(Terminate);
   static NAN_METHOD(Cancel);
   static NAN_METHOD(PostMessage);
-  static NAN_METHOD(PopMessage);
 
 private:
   unique_ptr<char []> jsPathString;
@@ -62,6 +62,7 @@ private:
   uv_mutex_t mutex;
   uv_async_t messageAsync;
   pthread_t thread;
+  Persistent<Object> global;
   queue<QueueEntry> messageQueue;
   bool live;
 };
@@ -85,6 +86,12 @@ inline int Start(
   Local<Context> context = Context::New(isolate);
   // Local<Context> context = NewContext(isolate);
   Context::Scope context_scope(context);
+
+  {
+    Local<Object> global = context->Global();
+    global->Set(JS_STR("onthreadmessage"), Nan::Null());
+    thread->setGlobal(global);
+  }
 
   Environment *env = CreateEnvironment(isolate_data, context, argc, argv, exec_argc, exec_argv);
 
@@ -249,10 +256,29 @@ void exitAsyncCb(uv_async_t *handle) {
   thread->setLive(false);
 }
 void messageAsyncCb(uv_async_t *handle) {
-  /* Local<Array> result = Nan::New<Array>(2); // XXX
-  result->Set(0, Nan::New<Number>(*reinterpret_cast<double*>(&address)));
-  result->Set(1, Nan::New<Number>(*reinterpret_cast<double*>(&size)));
-  return result; */
+  Nan::HandleScope handleScope;
+
+  Thread *thread = Thread::getCurrentThread();
+
+  queue<QueueEntry> list(thread->getMessageQueue());
+
+  Local<Object> global = thread->getGlobal();
+  Local<Value> onthreadmessageValue = global->Get(JS_STR("onthreadmessage"));
+  if (onthreadmessageValue->IsFunction()) {
+    Local<Function> onthreadmessageFn = Local<Function>::Cast(onthreadmessageValue);
+
+    for (size_t i = 0; i < list.size(); i++) {
+      const QueueEntry &queueEntry = list.back();
+      list.pop();
+
+      char *data = (char *)queueEntry.address;
+      size_t size = queueEntry.size;
+      Local<ArrayBuffer> message = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
+
+      Local<Value> argv[] = {message};
+      onthreadmessageFn->Call(Nan::Null(), sizeof(argv)/sizeof(argv[0]), argv);
+    }
+  }
 }
 
 Handle<Object> Thread::Initialize() {
@@ -265,7 +291,6 @@ Handle<Object> Thread::Initialize() {
   Nan::SetPrototypeMethod(ctor, "terminate", Thread::Terminate);
   Nan::SetPrototypeMethod(ctor, "cancel", Thread::Cancel);
   Nan::SetPrototypeMethod(ctor, "postMessage", Thread::PostMessage);
-  Nan::SetPrototypeMethod(ctor, "popMessage", Thread::PopMessage);
 
   Local<Function> ctorFn = ctor->GetFunction();
 
@@ -295,26 +320,31 @@ void Thread::pushMessage(const QueueEntry &queueEntry) {
 
   messageQueue.push(queueEntry);
 
+  uv_async_send(&messageAsync);
+
   uv_mutex_unlock(&mutex);
 }
-QueueEntry Thread::popMessage() {
+queue<QueueEntry> Thread::getMessageQueue() {
   uv_mutex_lock(&mutex);
 
-  const QueueEntry &result = messageQueue.back();
-  messageQueue.pop();
+  queue<QueueEntry> result;
+  messageQueue.swap(result);
 
   uv_mutex_unlock(&mutex);
 
   return result;
-}
-size_t Thread::getNumMessages() const {
-  size_t result = messageQueue.size();
 }
 Thread *Thread::getCurrentThread() {
   return (Thread *)uv_key_get(&threadKey);
 }
 void Thread::setCurrentThread(Thread *thread) {
   uv_key_set(&threadKey, thread);
+}
+void Thread::setGlobal(Local<Object> global) {
+  this->global.Reset(Isolate::GetCurrent(), global);
+}
+Local<Object> Thread::getGlobal() {
+  return Nan::New(global);
 }
 bool Thread::getLive() const {
   return live;
@@ -402,22 +432,6 @@ NAN_METHOD(Thread::PostMessage) {
     return Nan::ThrowError("invalid arguments");
   }
 }
-NAN_METHOD(Thread::PopMessage) {
-  Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
-
-  uv_mutex_lock(&thread->getMutex());
-
-  const QueueEntry &queueEntry = thread->popMessage();
-
-  uv_mutex_unlock(&thread->getMutex());
-
-  char *data = (char *)queueEntry.address;
-  size_t size = queueEntry.size;
-  Local<ArrayBuffer> result = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
-
-  info.GetReturnValue().Set(result);
-}
-
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
 
