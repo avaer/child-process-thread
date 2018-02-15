@@ -42,6 +42,7 @@ public:
   void pushMessageOut(const QueueEntry &queueEntry);
   queue<QueueEntry> getMessageQueueIn();
   queue<QueueEntry> getMessageQueueOut();
+  static const string &getChildJsPath();
   static void setChildJsPath(const string &childJsPath);
   static Thread *getCurrentThread();
   static void setCurrentThread(Thread *thread);
@@ -270,11 +271,15 @@ static void *threadFn(void *arg) {
   strncpy(binPathArg, binPathString, sizeof(argsString) - i);
   i += strlen(binPathString) + 1;
 
+  char *childJsPathArg = argsString + i;
+  strncpy(childJsPathArg, Thread::getChildJsPath().c_str(), sizeof(argsString) - i);
+  i += Thread::getChildJsPath().length() + 1;
+
   char *jsPathArg = argsString + i;
   strncpy(jsPathArg, thread->getJsPath().c_str(), sizeof(argsString) - i);
   i += thread->getJsPath().length() + 1;
 
-  char *argv[] = {binPathArg, jsPathArg};
+  char *argv[] = {binPathArg, childJsPathArg, jsPathArg};
   int argc = sizeof(argv)/sizeof(argv[0]);
   int retval = Start(thread, argc, argv, argc, argv);
 
@@ -386,6 +391,9 @@ queue<QueueEntry> Thread::getMessageQueueOut() {
   uv_mutex_unlock(&mutex);
 
   return result;
+}
+const string &Thread::getChildJsPath() {
+  return Thread::childJsPath;
 }
 void Thread::setChildJsPath(const string &childJsPath) {
   Thread::childJsPath = childJsPath;
