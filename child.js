@@ -6,13 +6,10 @@ smiggles.bind({RawBuffer});
 const rawBufferSymbol = Symbol();
 
 onthreadmessage = arrayBuffer => {
-  const rawBuffer = new RawBuffer(arrayBuffer); // internalize
+  arrayBuffer[rawBufferSymbol] = new RawBuffer(arrayBuffer); // internalize
 
   if (onmessage !== null) {
     const m = smiggles.deserialize(arrayBuffer);
-    if (typeof m === 'object' && m !== null) {
-      m[rawBufferSymbol] = rawBuffer; // bind storage lifetime
-    }
     onmessage(m);
   }
 };
