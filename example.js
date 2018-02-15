@@ -5,12 +5,8 @@ const smiggles = require('smiggles');
 
 childProcessThread.bind({RawBuffer});
 
-t1 = childProcessThread.fork(path.join(__dirname, 'example-worker1.js'), {
-  RawBuffer: RawBuffer.initFunctionAddress,
-});
-t2 = childProcessThread.fork(path.join(__dirname, 'example-worker2.js'), {
-  RawBuffer: RawBuffer.initFunctionAddress,
-});
+t1 = childProcessThread.fork(path.join(__dirname, 'example-worker1.js'));
+t2 = childProcessThread.fork(path.join(__dirname, 'example-worker2.js'));
 
 o = {
   float32Array: Float32Array.from([1.5, 2.5, 3.5]),

@@ -5,6 +5,10 @@ const smiggles = require('smiggles');
 
 const rawBufferSymbol = Symbol();
 
+Thread.fork = (fork => function(jsPath, imports = {}) {
+  imports['RawBuffer'] = RawBuffer.initFunctionAddress;
+  return fork.call(this, jsPath, imports);
+})(Thread.fork);
 Thread.setChildJsPath(path.join(__dirname, 'child.js'));
 Thread.prototype.postMessage = function(m, arrayBuffer) {
   arrayBuffer = smiggles.serialize(m, arrayBuffer);
