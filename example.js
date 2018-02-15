@@ -5,6 +5,8 @@ const smiggles = require('smiggles');
 
 childProcessThread.bind({RawBuffer});
 
+console.log('lol 0');
+
 t1 = childProcessThread.fork(path.join(__dirname, 'example-worker1.js'));
 t2 = childProcessThread.fork(path.join(__dirname, 'example-worker2.js'));
 
@@ -13,26 +15,29 @@ o = {
 };
 
 t1.postMessage(o);
-
-immediate = null;
-_recurse = () => {
-  const ms = t1.pollMessages();
-  if (ms) {
-    for (let i = 0; i < ms.length; i++) {
-      const m = ms[i];
-      console.log('got main thread message', m);
-    }
-  } else {
-    immediate = setImmediate(_recurse);
-  }
+t1.onmessage = m => {
+  console.log('got main thread message', m);
 };
-_recurse();
 
 setTimeout(() => {
   console.log('lol 3');
 
   t1.terminate();
+  console.log('lol 4');
   t2.cancel();
 
-  console.log('lol 4');
+  console.log('lol 5');
+
+  // coerce thread destruction
+  t1 = null;
+  t2 = null;
+  for (let i = 0; i < 1000; i++) {
+    const x = {
+      buffer: new ArrayBuffer(1024 * 1024),
+    };
+  }
+
+  setTimeout(() => {
+    console.log('lol 6');
+  }, 1000);
 }, 200);

@@ -15,22 +15,15 @@ Thread.prototype.postMessage = function(m, arrayBuffer) {
   new RawBuffer(arrayBuffer).toAddress(); // externalize
   this.postThreadMessage(arrayBuffer);
 };
-Thread.prototype.pollMessages = function() {
-  let ms;
+Thread.prototype.onthreadmessage = function(arrayBuffer) {
+  console.log('got thread message', arrayBuffer.byteLength, typeof this.onmessage);
 
-  const arrayBuffers = this.pollThreadMessages();
-  if (arrayBuffers) {
-    ms = Array(arrayBuffers.length);
+  arrayBuffer[rawBufferSymbol] = new RawBuffer(arrayBuffer); // internalize
 
-    for (let i = 0; i < arrayBuffers.length; i++) {
-      const arrayBuffer = arrayBuffers[i];
-      arrayBuffer[rawBufferSymbol] = new RawBuffer(arrayBuffer); // internalize
-
-      const m = smiggles.deserialize(arrayBuffer);
-      ms[i] = m;
-    }
+  if (this.onmessage) {
+    const m = smiggles.deserialize(arrayBuffer);
+    this.onmessage(m);
   }
-  return ms;
 };
 Thread.bind = bindings => smiggles.bind(bindings);
 

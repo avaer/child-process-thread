@@ -5,6 +5,7 @@
 
 #include <pthread.h>
 #include <memory>
+#include <map>
 
 using namespace v8;
 using namespace node;
@@ -36,20 +37,32 @@ public:
   const vector<pair<string, uintptr_t>> &getImports() const;
   pthread_t &getThread();
   uv_loop_t &getLoop();
-  uv_async_t &getExitAsync();
+  unique_ptr<uv_async_t> &getExitAsync();
+  unique_ptr<uv_async_t> &getMessageAsyncIn();
+  unique_ptr<uv_async_t> &getMessageAsyncOut();
   uv_mutex_t &getMutex();
   void pushMessageIn(const QueueEntry &queueEntry);
   void pushMessageOut(const QueueEntry &queueEntry);
   queue<QueueEntry> getMessageQueueIn();
   queue<QueueEntry> getMessageQueueOut();
-  static const string &getChildJsPath();
-  static void setChildJsPath(const string &childJsPath);
-  static Thread *getCurrentThread();
-  static void setCurrentThread(Thread *thread);
-  void setGlobal(Local<Object> global);
-  Local<Object> getGlobal();
+
+  void setThreadGlobal(Local<Object> global);
+  Local<Object> getThreadGlobal();
+  void removeThreadGlobal();
+  void setThreadObject(Local<Object> threadObj);
+  Local<Object> getThreadObject();
+  void removeThreadObject();
   bool getLive() const;
   void setLive(bool live);
+
+  static const string &getChildJsPath();
+  static void setChildJsPath(const string &childJsPath);
+  static Thread *getThreadByKey(uintptr_t key);
+  static void setThreadByKey(uintptr_t key, Thread *thread);
+  static void removeThreadByKey(uintptr_t key);
+  static Thread *getCurrentThread();
+  static void setCurrentThread(Thread *thread);
+  static uv_loop_t *getCurrentEventLoop();
 
   Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &imports);
   ~Thread();
@@ -60,19 +73,21 @@ public:
   static NAN_METHOD(Cancel);
   static NAN_METHOD(PostThreadMessageIn);
   static NAN_METHOD(PostThreadMessageOut);
-  static NAN_METHOD(PollThreadMessagesOut);
 
 private:
   static string childJsPath;
+  static map<uintptr_t, Thread*> threadMap;
 
   string jsPath;
   vector<pair<string, uintptr_t>> imports;
   uv_loop_t loop;
-  uv_async_t exitAsync;
   uv_mutex_t mutex;
-  uv_async_t messageAsyncIn;
+  unique_ptr<uv_async_t> exitAsync;
+  unique_ptr<uv_async_t> messageAsyncIn;
+  unique_ptr<uv_async_t> messageAsyncOut;
   pthread_t thread;
   Persistent<Object> global;
+  Persistent<Object> threadObj;
   queue<QueueEntry> messageQueueIn;
   queue<QueueEntry> messageQueueOut;
   bool live;
@@ -120,15 +135,15 @@ inline int Start(
     global->Set(JS_STR("onthreadmessage"), Nan::Null());
     global->Set(JS_STR("postThreadMessage"), Nan::New<Function>(Thread::PostThreadMessageOut));
 
-    thread->setGlobal(global);
+    thread->setThreadGlobal(global);
   }
 
   Environment *env = CreateEnvironment(isolate_data, context, argc, argv, exec_argc, exec_argv);
 
-  uv_key_t thread_local_env;
-  uv_key_create(&thread_local_env);
+  // uv_key_t thread_local_env;
+  // uv_key_create(&thread_local_env);
   // CHECK_EQ(0, uv_key_create(&thread_local_env));
-  uv_key_set(&thread_local_env, env);
+  // uv_key_set(&thread_local_env, env);
   // env->Start(argc, argv, exec_argc, exec_argv, v8_is_profiling);
 
   LoadEnvironment(env);
@@ -181,11 +196,13 @@ inline int Start(
     // PERFORMANCE_MARK(&env, LOOP_EXIT);
   }
 
+  thread->removeThreadGlobal();
+
   // env.set_trace_sync_io(false);
 
   /* const int exit_code = EmitExit(&env);
   RunAtExit(&env); */
-  uv_key_delete(&thread_local_env);
+  // uv_key_delete(&thread_local_env);
 
   FreeEnvironment(env);
 
@@ -296,7 +313,7 @@ void messageAsyncInCb(uv_async_t *handle) {
 
   queue<QueueEntry> messageQueue(thread->getMessageQueueIn());
 
-  Local<Object> global = thread->getGlobal();
+  Local<Object> global = thread->getThreadGlobal();
   Local<Value> onthreadmessageValue = global->Get(JS_STR("onthreadmessage"));
   if (onthreadmessageValue->IsFunction()) {
     Local<Function> onthreadmessageFn = Local<Function>::Cast(onthreadmessageValue);
@@ -314,6 +331,40 @@ void messageAsyncInCb(uv_async_t *handle) {
     }
   }
 }
+void messageAsyncOutCb(uv_async_t *handle) {
+  Nan::HandleScope handleScope;
+
+  Thread *thread = Thread::getThreadByKey((uintptr_t)handle);
+
+  queue<QueueEntry> messageQueue(thread->getMessageQueueOut());
+
+  Local<Object> threadObj = thread->getThreadObject();
+  Local<Value> onthreadmessageValue = threadObj->Get(JS_STR("onthreadmessage"));
+
+  if (onthreadmessageValue->IsFunction()) {
+    Local<Function> onthreadmessageFn = Local<Function>::Cast(onthreadmessageValue);
+
+    for (size_t i = 0; i < messageQueue.size(); i++) {
+      const QueueEntry &queueEntry = messageQueue.back();
+      messageQueue.pop();
+
+      char *data = (char *)queueEntry.address;
+      size_t size = queueEntry.size;
+      Local<ArrayBuffer> message = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
+
+      Local<Value> argv[] = {message};
+      onthreadmessageFn->Call(Nan::Null(), sizeof(argv)/sizeof(argv[0]), argv);
+    }
+  }
+}
+void closeHandleFn(uv_handle_t *handle) {
+  delete handle;
+}
+void walkHandleCleanupFn(uv_handle_t *handle, void *arg) {
+  if (uv_is_active(handle)) {
+    uv_close(handle, closeHandleFn);
+  }
+}
 
 Handle<Object> Thread::Initialize() {
   Nan::EscapableHandleScope scope;
@@ -325,7 +376,6 @@ Handle<Object> Thread::Initialize() {
   Nan::SetPrototypeMethod(ctor, "terminate", Thread::Terminate);
   Nan::SetPrototypeMethod(ctor, "cancel", Thread::Cancel);
   Nan::SetPrototypeMethod(ctor, "postThreadMessage", Thread::PostThreadMessageIn);
-  Nan::SetPrototypeMethod(ctor, "pollThreadMessages", Thread::PollThreadMessagesOut);
 
   Local<Function> ctorFn = ctor->GetFunction();
 
@@ -348,8 +398,14 @@ pthread_t &Thread::getThread() {
 uv_loop_t &Thread::getLoop() {
   return loop;
 }
-uv_async_t &Thread::getExitAsync() {
+unique_ptr<uv_async_t> &Thread::getExitAsync() {
   return exitAsync;
+}
+unique_ptr<uv_async_t> &Thread::getMessageAsyncIn() {
+  return messageAsyncIn;
+}
+unique_ptr<uv_async_t> &Thread::getMessageAsyncOut() {
+  return messageAsyncOut;
 }
 uv_mutex_t &Thread::getMutex() {
   return mutex;
@@ -359,7 +415,7 @@ void Thread::pushMessageIn(const QueueEntry &queueEntry) {
 
   messageQueueIn.push(queueEntry);
 
-  uv_async_send(&messageAsyncIn);
+  uv_async_send(messageAsyncIn.get());
 
   uv_mutex_unlock(&mutex);
 }
@@ -368,7 +424,7 @@ void Thread::pushMessageOut(const QueueEntry &queueEntry) {
 
   messageQueueOut.push(queueEntry);
 
-  uv_async_send(&messageAsyncIn);
+  uv_async_send(messageAsyncOut.get());
 
   uv_mutex_unlock(&mutex);
 }
@@ -392,11 +448,45 @@ queue<QueueEntry> Thread::getMessageQueueOut() {
 
   return result;
 }
+void Thread::setThreadGlobal(Local<Object> global) {
+  this->global.Reset(Isolate::GetCurrent(), global);
+}
+Local<Object> Thread::getThreadGlobal() {
+  return Nan::New(global);
+}
+void Thread::removeThreadGlobal() {
+  global.Reset();
+}
+bool Thread::getLive() const {
+  return live;
+}
+void Thread::setThreadObject(Local<Object> threadObj) {
+  this->threadObj.Reset(Isolate::GetCurrent(), threadObj);
+}
+Local<Object> Thread::getThreadObject() {
+  return Nan::New(threadObj);
+}
+void Thread::removeThreadObject() {
+  threadObj.Reset();
+}
+void Thread::setLive(bool live) {
+  this->live = live;
+}
+
 const string &Thread::getChildJsPath() {
   return Thread::childJsPath;
 }
 void Thread::setChildJsPath(const string &childJsPath) {
   Thread::childJsPath = childJsPath;
+}
+Thread *Thread::getThreadByKey(uintptr_t key) {
+  return Thread::threadMap.at(key);
+}
+void Thread::setThreadByKey(uintptr_t key, Thread *thread) {
+  Thread::threadMap[key] = thread;
+}
+void Thread::removeThreadByKey(uintptr_t key) {
+  Thread::threadMap.erase(key);
 }
 Thread *Thread::getCurrentThread() {
   return (Thread *)uv_key_get(&threadKey);
@@ -404,33 +494,34 @@ Thread *Thread::getCurrentThread() {
 void Thread::setCurrentThread(Thread *thread) {
   uv_key_set(&threadKey, thread);
 }
-void Thread::setGlobal(Local<Object> global) {
-  this->global.Reset(Isolate::GetCurrent(), global);
+uv_loop_t *Thread::getCurrentEventLoop() {
+  Thread *thread = Thread::getCurrentThread();
+
+  if (thread != nullptr) {
+    return &thread->loop;
+  } else {
+    return uv_default_loop();
+  }
 }
-Local<Object> Thread::getGlobal() {
-  return Nan::New(global);
-}
-bool Thread::getLive() const {
-  return live;
-}
-void Thread::setLive(bool live) {
-  this->live = live;
-}
+
 Thread::Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &imports) : jsPath(jsPath), imports(imports) {
   uv_loop_init(&loop);
-  uv_async_init(&loop, &exitAsync, exitAsyncCb);
   uv_mutex_init(&mutex);
-  uv_async_init(&loop, &messageAsyncIn, messageAsyncInCb);
+
+  exitAsync = unique_ptr<uv_async_t>(new uv_async_t());
+  uv_async_init(&loop, exitAsync.get(), exitAsyncCb);
+  messageAsyncIn = unique_ptr<uv_async_t>(new uv_async_t());
+  uv_async_init(&loop, messageAsyncIn.get(), messageAsyncInCb);
+  messageAsyncOut = unique_ptr<uv_async_t>(new uv_async_t());
+  uv_async_init(Thread::getCurrentEventLoop(), messageAsyncOut.get(), messageAsyncOutCb);
 
   live = true;
 
+  Thread::setThreadByKey((uintptr_t)messageAsyncOut.get(), this);
+
   pthread_create(&thread, nullptr, threadFn, this);
 }
-Thread::~Thread() {
-  uv_close((uv_handle_t *)&exitAsync, nullptr);
-  uv_close((uv_handle_t *)&messageAsyncIn, nullptr);
-  uv_close((uv_handle_t *)&loop, nullptr);
-}
+Thread::~Thread() {}
 NAN_METHOD(Thread::New) {
   Nan::HandleScope scope;
 
@@ -460,6 +551,7 @@ NAN_METHOD(Thread::New) {
 
     Thread *thread = new Thread(jsPath, imports);
     thread->Wrap(rawThreadObj);
+    thread->setThreadObject(rawThreadObj);
 
     info.GetReturnValue().Set(rawThreadObj);
   } else {
@@ -495,19 +587,53 @@ NAN_METHOD(Thread::SetChildJsPath) {
 NAN_METHOD(Thread::Terminate) {
   Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
 
-  uv_async_send(&thread->getExitAsync());
+  // signal exit to thread
+  uv_async_send(thread->getExitAsync().get());
 
+  // wait for thread to exit
   void *retval;
   int result = pthread_join(thread->getThread(), &retval);
+
+  // close local message handle
+  uv_async_t *messageAsyncOut = thread->getMessageAsyncOut().release();
+  uv_close((uv_handle_t *)messageAsyncOut, closeHandleFn);
+
+  // release ownership of handles
+  thread->getExitAsync().release();
+  thread->getMessageAsyncIn().release();
+
+  // clean up remote message handles
+  uv_walk(&thread->getLoop(), walkHandleCleanupFn, nullptr);
+
+  // clean up local thread references
+  Thread::removeThreadByKey((uintptr_t)messageAsyncOut);
+  thread->removeThreadObject();
 
   info.GetReturnValue().Set(Nan::New<Integer>(result == 0 ? (*(int *)retval) : 1));
 }
 NAN_METHOD(Thread::Cancel) {
   Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
 
+  // forcefully cancel thread
   pthread_cancel(thread->getThread());
 
+  // wait for thread to exit
   pthread_join(thread->getThread(), nullptr);
+
+  // close local message handle
+  uv_async_t *messageAsyncOut = thread->getMessageAsyncOut().release();
+  uv_close((uv_handle_t *)messageAsyncOut, closeHandleFn);
+
+  // release ownership of handles
+  thread->getExitAsync().release();
+  thread->getMessageAsyncIn().release();
+
+  // clean up remote message handles
+  uv_walk(&thread->getLoop(), walkHandleCleanupFn, nullptr);
+
+  // clean up local thread references
+  Thread::removeThreadByKey((uintptr_t)messageAsyncOut);
+  thread->removeThreadObject();
 }
 NAN_METHOD(Thread::PostThreadMessageIn) {
   if (info[0]->IsArrayBuffer()) {
@@ -543,32 +669,14 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
     return Nan::ThrowError("invalid arguments");
   }
 }
-NAN_METHOD(Thread::PollThreadMessagesOut) {
-  Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
-
-  queue<QueueEntry> messageQueue(thread->getMessageQueueOut());
-  if (messageQueue.size() > 0) {
-    Local<Array> result = Nan::New<Array>(messageQueue.size());
-    for (size_t i = 0; i < messageQueue.size(); i++) {
-      const QueueEntry &queueEntry = messageQueue.back();
-      messageQueue.pop();
-
-      char *data = (char *)queueEntry.address;
-      size_t size = queueEntry.size;
-      Local<ArrayBuffer> message = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
-      result->Set(i, message);
-    }
-    info.GetReturnValue().Set(result);
-  } else {
-    info.GetReturnValue().Set(Nan::Null());
-  }
-}
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
+  uv_key_set(&threadKey, nullptr);
 
   exports->Set(JS_STR("Thread"), Thread::Initialize());
 }
 string Thread::childJsPath;
+map<uintptr_t, Thread*> Thread::threadMap;
 
 NODE_MODULE(NODE_GYP_MODULE_NAME, Init)
 
