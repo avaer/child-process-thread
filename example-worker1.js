@@ -1,4 +1,6 @@
-console.log('lol 1');
+const {RawBuffer: {RawBuffer}} = imports;
+
+console.log('lol 1', RawBuffer);
 
 onthreadmessage = d => {
   console.log('got thread message', d);

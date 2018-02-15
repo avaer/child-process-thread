@@ -32,7 +32,8 @@ public:
 class Thread : public Nan::ObjectWrap {
 public:
   static Handle<Object> Initialize();
-  char *getJsPathString();
+  const string &getJsPath() const;
+  const vector<pair<string, uintptr_t>> &getImports() const;
   pthread_t &getThread();
   uv_loop_t &getLoop();
   uv_async_t &getExitAsync();
@@ -47,7 +48,7 @@ public:
   void setLive(bool live);
 
 protected:
-  Thread(const char *src, size_t length);
+  Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &imports);
   ~Thread();
   static NAN_METHOD(New);
   static NAN_METHOD(Fork);
@@ -56,7 +57,8 @@ protected:
   static NAN_METHOD(PostMessage);
 
 private:
-  unique_ptr<char []> jsPathString;
+  string jsPath;
+  vector<pair<string, uintptr_t>> imports;
   uv_loop_t loop;
   uv_async_t exitAsync;
   uv_mutex_t mutex;
@@ -89,7 +91,26 @@ inline int Start(
 
   {
     Local<Object> global = context->Global();
+
+    Local<Object> importsObj = Nan::New<Object>();
+    const vector<pair<string, uintptr_t>> imports = thread->getImports();
+    for (size_t i = 0; i < imports.size(); i++) {
+      const pair<string, uintptr_t> &import = imports[i];
+      const string &name = import.first;
+      const uintptr_t address = import.second;
+
+      void (*Init)(Handle<Object> exports) = (void (*)(Handle<Object>))address;
+      Local<Object> exportsObj = Nan::New<Object>();
+      Init(exportsObj);
+
+      // XXX
+
+      importsObj->Set(Nan::New<String>(name).ToLocalChecked(), exportsObj);
+    }
+    global->Set(JS_STR("imports"), importsObj);
+
     global->Set(JS_STR("onthreadmessage"), Nan::Null());
+
     thread->setGlobal(global);
   }
 
@@ -242,8 +263,8 @@ static void *threadFn(void *arg) {
   i += strlen(binPathString) + 1;
 
   char *jsPathArg = argsString + i;
-  strncpy(jsPathArg, thread->getJsPathString(), sizeof(argsString) - i);
-  i += strlen(thread->getJsPathString()) + 1;
+  strncpy(jsPathArg, thread->getJsPath().c_str(), sizeof(argsString) - i);
+  i += thread->getJsPath().length() + 1;
 
   char *argv[] = {binPathArg, jsPathArg};
   int argc = sizeof(argv)/sizeof(argv[0]);
@@ -300,8 +321,11 @@ Handle<Object> Thread::Initialize() {
 
   return scope.Escape(ctorFn);
 }
-char *Thread::getJsPathString() {
-  return jsPathString.get();
+const string &Thread::getJsPath() const {
+  return jsPath;
+}
+const vector<pair<string, uintptr_t>> &Thread::getImports() const {
+  return imports;
 }
 pthread_t &Thread::getThread() {
   return thread;
@@ -352,12 +376,7 @@ bool Thread::getLive() const {
 void Thread::setLive(bool live) {
   this->live = live;
 }
-Thread::Thread(const char *src, size_t length) {
-  char *data = new char[length + 1];
-  memcpy(data, src, length);
-  data[length] = 0;
-  jsPathString = unique_ptr<char[]>(data);
-
+Thread::Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &imports) : jsPath(jsPath), imports(imports) {
   uv_loop_init(&loop);
   uv_async_init(&loop, &exitAsync, exitAsyncCb);
   uv_mutex_init(&mutex);
@@ -375,14 +394,31 @@ Thread::~Thread() {
 NAN_METHOD(Thread::New) {
   Nan::HandleScope scope;
 
-  if (info[0]->IsString()) {
+  if (info[0]->IsString() && info[1]->IsObject()) {
     Local<Object> rawThreadObj = info.This();
 
     Local<String> jsPathValue = info[0]->ToString();
     String::Utf8Value jsPathValueUtf8(jsPathValue);
     size_t length = jsPathValueUtf8.length();
+    string jsPath(*jsPathValueUtf8, length);
 
-    Thread *thread = new Thread(*jsPathValueUtf8, length);
+    Local<Object> importsObject = Local<Object>::Cast(info[1]);
+    Local<Array> importsObjectKeys = importsObject->GetOwnPropertyNames();
+    vector<pair<string, uintptr_t>> imports;
+    for (size_t i = 0; i < importsObjectKeys->Length(); i++) {
+      Local<String> key = Local<String>::Cast(importsObjectKeys->Get(i));
+      Local<Number> value = Local<Number>::Cast(importsObject->Get(key));
+
+      String::Utf8Value keyValueUtf8(key);
+      string importName(*keyValueUtf8, keyValueUtf8.length());
+
+      double numberValue = value->NumberValue();
+      uintptr_t address = *reinterpret_cast<uintptr_t*>(&numberValue);
+
+      imports.emplace_back(importName, address);
+    }
+
+    Thread *thread = new Thread(jsPath, imports);
     thread->Wrap(rawThreadObj);
 
     info.GetReturnValue().Set(rawThreadObj);
@@ -391,10 +427,11 @@ NAN_METHOD(Thread::New) {
   }
 }
 NAN_METHOD(Thread::Fork) {
-  if (info[0]->IsString()) {
+  if (info[0]->IsString() && info[1]->IsObject()) {
     Local<Function> threadConstructor = Local<Function>::Cast(info.Callee()->Get(JS_STR("Thread")));
     Local<Value> argv[] = {
       info[0],
+      info[1],
     };
     Local<Value> threadObj = threadConstructor->NewInstance(sizeof(argv)/sizeof(argv[0]), argv);
 
@@ -425,9 +462,14 @@ NAN_METHOD(Thread::PostMessage) {
 
   if (info[0]->IsArrayBuffer()) {
     Local<ArrayBuffer> arrayBuffer = Local<ArrayBuffer>::Cast(info[0]);
-    QueueEntry queueEntry((uintptr_t)arrayBuffer->GetContents().Data(), arrayBuffer->ByteLength());
 
-    thread->pushMessage(queueEntry);
+    if (arrayBuffer->IsExternal()) {
+      QueueEntry queueEntry((uintptr_t)arrayBuffer->GetContents().Data(), arrayBuffer->ByteLength());
+
+      thread->pushMessage(queueEntry);
+    } else {
+      return Nan::ThrowError("ArrayBuffer is not external");
+    }
   } else {
     return Nan::ThrowError("invalid arguments");
   }

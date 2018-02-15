@@ -4,7 +4,8 @@
   "description": "Child process in a thread for node",
   "main": "index.js",
   "dependencies": {
-    "nan": "^2.8.0"
+    "nan": "^2.8.0",
+    "raw-buffer": "0.0.5"
   },
   "devDependencies": {},
   "scripts": {
