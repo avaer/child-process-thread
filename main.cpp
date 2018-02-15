@@ -38,8 +38,10 @@ public:
   uv_loop_t &getLoop();
   uv_async_t &getExitAsync();
   uv_mutex_t &getMutex();
-  void pushMessage(const QueueEntry &queueEntry);
-  queue<QueueEntry> getMessageQueue();
+  void pushMessageIn(const QueueEntry &queueEntry);
+  void pushMessageOut(const QueueEntry &queueEntry);
+  queue<QueueEntry> getMessageQueueIn();
+  queue<QueueEntry> getMessageQueueOut();
   static Thread *getCurrentThread();
   static void setCurrentThread(Thread *thread);
   void setGlobal(Local<Object> global);
@@ -47,14 +49,15 @@ public:
   bool getLive() const;
   void setLive(bool live);
 
-protected:
   Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &imports);
   ~Thread();
   static NAN_METHOD(New);
   static NAN_METHOD(Fork);
   static NAN_METHOD(Terminate);
   static NAN_METHOD(Cancel);
-  static NAN_METHOD(PostThreadMessage);
+  static NAN_METHOD(PostThreadMessageIn);
+  static NAN_METHOD(PostThreadMessageOut);
+  static NAN_METHOD(PollThreadMessagesOut);
 
 private:
   string jsPath;
@@ -62,10 +65,11 @@ private:
   uv_loop_t loop;
   uv_async_t exitAsync;
   uv_mutex_t mutex;
-  uv_async_t messageAsync;
+  uv_async_t messageAsyncIn;
   pthread_t thread;
   Persistent<Object> global;
-  queue<QueueEntry> messageQueue;
+  queue<QueueEntry> messageQueueIn;
+  queue<QueueEntry> messageQueueOut;
   bool live;
 };
 
@@ -108,8 +112,8 @@ inline int Start(
       importsObj->Set(Nan::New<String>(name).ToLocalChecked(), exportsObj);
     }
     global->Set(JS_STR("imports"), importsObj);
-
     global->Set(JS_STR("onthreadmessage"), Nan::Null());
+    global->Set(JS_STR("postThreadMessage"), Nan::New<Function>(Thread::PostThreadMessageOut));
 
     thread->setGlobal(global);
   }
@@ -276,21 +280,21 @@ void exitAsyncCb(uv_async_t *handle) {
   Thread *thread = Thread::getCurrentThread();
   thread->setLive(false);
 }
-void messageAsyncCb(uv_async_t *handle) {
+void messageAsyncInCb(uv_async_t *handle) {
   Nan::HandleScope handleScope;
 
   Thread *thread = Thread::getCurrentThread();
 
-  queue<QueueEntry> list(thread->getMessageQueue());
+  queue<QueueEntry> messageQueue(thread->getMessageQueueIn());
 
   Local<Object> global = thread->getGlobal();
   Local<Value> onthreadmessageValue = global->Get(JS_STR("onthreadmessage"));
   if (onthreadmessageValue->IsFunction()) {
     Local<Function> onthreadmessageFn = Local<Function>::Cast(onthreadmessageValue);
 
-    for (size_t i = 0; i < list.size(); i++) {
-      const QueueEntry &queueEntry = list.back();
-      list.pop();
+    for (size_t i = 0; i < messageQueue.size(); i++) {
+      const QueueEntry &queueEntry = messageQueue.back();
+      messageQueue.pop();
 
       char *data = (char *)queueEntry.address;
       size_t size = queueEntry.size;
@@ -311,7 +315,8 @@ Handle<Object> Thread::Initialize() {
   ctor->SetClassName(JS_STR("Thread"));
   Nan::SetPrototypeMethod(ctor, "terminate", Thread::Terminate);
   Nan::SetPrototypeMethod(ctor, "cancel", Thread::Cancel);
-  Nan::SetPrototypeMethod(ctor, "postThreadMessage", Thread::PostThreadMessage);
+  Nan::SetPrototypeMethod(ctor, "postThreadMessage", Thread::PostThreadMessageIn);
+  Nan::SetPrototypeMethod(ctor, "pollThreadMessages", Thread::PollThreadMessagesOut);
 
   Local<Function> ctorFn = ctor->GetFunction();
 
@@ -339,20 +344,39 @@ uv_async_t &Thread::getExitAsync() {
 uv_mutex_t &Thread::getMutex() {
   return mutex;
 }
-void Thread::pushMessage(const QueueEntry &queueEntry) {
+void Thread::pushMessageIn(const QueueEntry &queueEntry) {
   uv_mutex_lock(&mutex);
 
-  messageQueue.push(queueEntry);
+  messageQueueIn.push(queueEntry);
 
-  uv_async_send(&messageAsync);
+  uv_async_send(&messageAsyncIn);
 
   uv_mutex_unlock(&mutex);
 }
-queue<QueueEntry> Thread::getMessageQueue() {
+void Thread::pushMessageOut(const QueueEntry &queueEntry) {
+  uv_mutex_lock(&mutex);
+
+  messageQueueOut.push(queueEntry);
+
+  uv_async_send(&messageAsyncIn);
+
+  uv_mutex_unlock(&mutex);
+}
+queue<QueueEntry> Thread::getMessageQueueIn() {
   uv_mutex_lock(&mutex);
 
   queue<QueueEntry> result;
-  messageQueue.swap(result);
+  messageQueueIn.swap(result);
+
+  uv_mutex_unlock(&mutex);
+
+  return result;
+}
+queue<QueueEntry> Thread::getMessageQueueOut() {
+  uv_mutex_lock(&mutex);
+
+  queue<QueueEntry> result;
+  messageQueueOut.swap(result);
 
   uv_mutex_unlock(&mutex);
 
@@ -380,7 +404,7 @@ Thread::Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &impo
   uv_loop_init(&loop);
   uv_async_init(&loop, &exitAsync, exitAsyncCb);
   uv_mutex_init(&mutex);
-  uv_async_init(&loop, &messageAsync, messageAsyncCb);
+  uv_async_init(&loop, &messageAsyncIn, messageAsyncInCb);
 
   live = true;
 
@@ -388,7 +412,7 @@ Thread::Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &impo
 }
 Thread::~Thread() {
   uv_close((uv_handle_t *)&exitAsync, nullptr);
-  uv_close((uv_handle_t *)&messageAsync, nullptr);
+  uv_close((uv_handle_t *)&messageAsyncIn, nullptr);
   uv_close((uv_handle_t *)&loop, nullptr);
 }
 NAN_METHOD(Thread::New) {
@@ -457,21 +481,58 @@ NAN_METHOD(Thread::Cancel) {
 
   pthread_join(thread->getThread(), nullptr);
 }
-NAN_METHOD(Thread::PostThreadMessage) {
-  Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
-
+NAN_METHOD(Thread::PostThreadMessageIn) {
   if (info[0]->IsArrayBuffer()) {
+    Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
+
     Local<ArrayBuffer> arrayBuffer = Local<ArrayBuffer>::Cast(info[0]);
 
     if (arrayBuffer->IsExternal()) {
       QueueEntry queueEntry((uintptr_t)arrayBuffer->GetContents().Data(), arrayBuffer->ByteLength());
 
-      thread->pushMessage(queueEntry);
+      thread->pushMessageIn(queueEntry);
     } else {
       return Nan::ThrowError("ArrayBuffer is not external");
     }
   } else {
     return Nan::ThrowError("invalid arguments");
+  }
+}
+NAN_METHOD(Thread::PostThreadMessageOut) {
+  if (info[0]->IsArrayBuffer()) {
+    Thread *thread = Thread::getCurrentThread();
+
+    Local<ArrayBuffer> arrayBuffer = Local<ArrayBuffer>::Cast(info[0]);
+
+    if (arrayBuffer->IsExternal()) {
+      QueueEntry queueEntry((uintptr_t)arrayBuffer->GetContents().Data(), arrayBuffer->ByteLength());
+
+      thread->pushMessageOut(queueEntry);
+    } else {
+      return Nan::ThrowError("ArrayBuffer is not external");
+    }
+  } else {
+    return Nan::ThrowError("invalid arguments");
+  }
+}
+NAN_METHOD(Thread::PollThreadMessagesOut) {
+  Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
+
+  queue<QueueEntry> messageQueue(thread->getMessageQueueOut());
+  if (messageQueue.size() > 0) {
+    Local<Array> result = Nan::New<Array>(messageQueue.size());
+    for (size_t i = 0; i < messageQueue.size(); i++) {
+      const QueueEntry &queueEntry = messageQueue.back();
+      messageQueue.pop();
+
+      char *data = (char *)queueEntry.address;
+      size_t size = queueEntry.size;
+      Local<ArrayBuffer> message = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
+      result->Set(i, message);
+    }
+    info.GetReturnValue().Set(result);
+  } else {
+    info.GetReturnValue().Set(Nan::Null());
   }
 }
 void Init(Handle<Object> exports) {
