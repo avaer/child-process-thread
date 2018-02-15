@@ -327,7 +327,7 @@ void messageAsyncInCb(uv_async_t *handle) {
       Local<ArrayBuffer> message = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
 
       Local<Value> argv[] = {message};
-      onthreadmessageFn->Call(Nan::Null(), sizeof(argv)/sizeof(argv[0]), argv);
+      onthreadmessageFn->Call(global, sizeof(argv)/sizeof(argv[0]), argv);
     }
   }
 }
@@ -353,7 +353,7 @@ void messageAsyncOutCb(uv_async_t *handle) {
       Local<ArrayBuffer> message = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
 
       Local<Value> argv[] = {message};
-      onthreadmessageFn->Call(Nan::Null(), sizeof(argv)/sizeof(argv[0]), argv);
+      onthreadmessageFn->Call(threadObj, sizeof(argv)/sizeof(argv[0]), argv);
     }
   }
 }
