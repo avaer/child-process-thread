@@ -3,7 +3,13 @@
 #include <node.h>
 #include <uv.h>
 
+#if _WIN32
+#include "deps/pthread-win32/config.h"
+#include "deps/pthread-win32/pthread.h"
+#else
 #include <pthread.h>
+#endif
+
 #include <memory>
 #include <map>
 
