@@ -325,7 +325,7 @@ void messageAsyncInCb(uv_async_t *handle) {
     Local<Function> onthreadmessageFn = Local<Function>::Cast(onthreadmessageValue);
 
     for (size_t i = 0; i < messageQueue.size(); i++) {
-      const QueueEntry &queueEntry = messageQueue.back();
+      const QueueEntry &queueEntry = messageQueue.front();
       messageQueue.pop();
 
       char *data = (char *)queueEntry.address;
@@ -351,7 +351,7 @@ void messageAsyncOutCb(uv_async_t *handle) {
     Local<Function> onthreadmessageFn = Local<Function>::Cast(onthreadmessageValue);
 
     for (size_t i = 0; i < messageQueue.size(); i++) {
-      const QueueEntry &queueEntry = messageQueue.back();
+      const QueueEntry &queueEntry = messageQueue.front();
       messageQueue.pop();
 
       char *data = (char *)queueEntry.address;
