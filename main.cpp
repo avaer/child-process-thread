@@ -184,7 +184,7 @@ inline int Start(
     thread->setLive(true);
 
     do {
-      uv_run(&thread->getLoop(), UV_RUN_ONCE);
+      uv_run(&thread->getLoop(), UV_RUN_NOWAIT);
 
       // v8_platform.DrainVMTasks(isolate);
 
