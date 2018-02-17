@@ -2,6 +2,7 @@ const path = require('path');
 const {Thread} = require(path.join(__dirname, 'build', 'Release', 'child_process_thread.node'));
 const RawBuffer = require('raw-buffer');
 const smiggles = require('smiggles');
+const MessageEvent = require('./message-event');
 
 smiggles.bind({RawBuffer});
 
@@ -22,7 +23,7 @@ Thread.prototype.onthreadmessage = function(arrayBuffer) {
 
   if (this.onmessage) {
     const m = smiggles.deserialize(arrayBuffer);
-    this.onmessage(m);
+    this.onmessage(new MessageEvent(m));
   }
 };
 Thread.bind = bindings => smiggles.bind(bindings);

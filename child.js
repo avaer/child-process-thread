@@ -1,5 +1,6 @@
 const {RawBuffer: {RawBuffer}} = imports;
 const smiggles = require('smiggles');
+const MessageEvent = require('./message-event');
 
 smiggles.bind({RawBuffer});
 
@@ -10,7 +11,7 @@ onthreadmessage = arrayBuffer => {
 
   if (onmessage !== null) {
     const m = smiggles.deserialize(arrayBuffer);
-    onmessage(m);
+    onmessage(new MessageEvent(m));
   }
 };
 onmessage = null;
