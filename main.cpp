@@ -204,10 +204,7 @@ inline int Start(
       // v8_platform.DrainVMTasks(isolate);
 
       more = uv_loop_alive(&thread->getLoop()) && thread->getLive();
-      if (more)
-        continue;
-
-      {
+      if (more) {
         HandleScope handle_scope(isolate);
         asyncResource.MakeCallback(asyncFunction, 0, nullptr);
       }
