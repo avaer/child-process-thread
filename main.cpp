@@ -27,6 +27,7 @@ namespace childProcessThread {
 
 uv_key_t threadKey;
 
+NAN_METHOD(nop) {}
 void walkHandlePruneFn(uv_handle_t *handle, void *arg) {
   if (uv_is_active(handle)) {
     if (handle->type == 16) { // UV_SIGNAL
@@ -118,7 +119,7 @@ static v8::Isolate *node_isolate; */
 } */
 
 inline int Start(
-  Thread *thread, Isolate* isolate, IsolateData* isolate_data,
+  Thread *thread, Isolate *isolate, IsolateData *isolate_data,
   int argc, const char* const* argv,
   int exec_argc, const char* const* exec_argv
 ) {
@@ -164,6 +165,10 @@ inline int Start(
 
   uv_walk(&thread->getLoop(), walkHandlePruneFn, nullptr);
 
+  Local<Object> asyncObj = Nan::New<Object>();
+  AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "asyncResource");
+  Local<Function> asyncFunction = Nan::New<Function>(nop);
+  
   /* const char* path = argc > 1 ? argv[1] : nullptr;
   StartInspector(&env, path, debug_options);
 
@@ -199,10 +204,12 @@ inline int Start(
       // v8_platform.DrainVMTasks(isolate);
 
       more = uv_loop_alive(&thread->getLoop()) && thread->getLive();
-      /* if (more) {
-        continue;
-      } */
 
+      {
+        HandleScope handle_scope(isolate);
+        asyncResource.MakeCallback(asyncFunction, 0, nullptr);
+      }
+      
       // EmitBeforeExit(env);
 
       // Emit `beforeExit` if the loop became alive either after emitting
