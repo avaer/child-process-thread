@@ -170,57 +170,58 @@ inline int Start(
 
   uv_walk(&thread->getLoop(), walkHandlePruneFn, nullptr);
 
-  Local<Object> asyncObj = Nan::New<Object>();
-  AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "asyncResource");
-  Local<Function> asyncFunction = Nan::New<Function>(nop);
-  
-  /* const char* path = argc > 1 ? argv[1] : nullptr;
-  StartInspector(&env, path, debug_options);
-
-  if (debug_options.inspector_enabled() && !v8_platform.InspectorStarted(&env))
-    return 12;  // Signal internal error.
-
-  env->set_abort_on_uncaught_exception(abort_on_uncaught_exception);
-
-  if (no_force_async_hooks_checks) {
-    env->async_hooks()->no_force_checks();
-  }
-
   {
-    Environment::AsyncCallbackScope callback_scope(env);
-    env->async_hooks()->push_async_ids(1, 0);
-    LoadEnvironment(env);
-    env->async_hooks()->pop_async_id(1);
-  }
+    Local<Object> asyncObj = Nan::New<Object>();
+    AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "asyncResource");
+    Local<Function> asyncFunction = Nan::New<Function>(nop);
+    
+    /* const char* path = argc > 1 ? argv[1] : nullptr;
+    StartInspector(&env, path, debug_options);
 
-  env->set_trace_sync_io(trace_sync_io); */
+    if (debug_options.inspector_enabled() && !v8_platform.InspectorStarted(&env))
+      return 12;  // Signal internal error.
 
+    env->set_abort_on_uncaught_exception(abort_on_uncaught_exception);
 
-  {
-    SealHandleScope seal(isolate);
-    bool more;
-    // PERFORMANCE_MARK(&env, LOOP_START)
+    if (no_force_async_hooks_checks) {
+      env->async_hooks()->no_force_checks();
+    }
 
-    thread->setLive(true);
+    {
+      Environment::AsyncCallbackScope callback_scope(env);
+      env->async_hooks()->push_async_ids(1, 0);
+      LoadEnvironment(env);
+      env->async_hooks()->pop_async_id(1);
+    }
 
-    do {
-      uv_run(&thread->getLoop(), UV_RUN_ONCE);
+    env->set_trace_sync_io(trace_sync_io); */
 
-      // v8_platform.DrainVMTasks(isolate);
+    {
+      SealHandleScope seal(isolate);
+      bool more;
+      // PERFORMANCE_MARK(&env, LOOP_START)
 
-      more = uv_loop_alive(&thread->getLoop()) && thread->getLive();
-      if (more) {
-        HandleScope handle_scope(isolate);
-        asyncResource.MakeCallback(asyncFunction, 0, nullptr);
-      }
-      
-      // EmitBeforeExit(env);
+      thread->setLive(true);
 
-      // Emit `beforeExit` if the loop became alive either after emitting
-      // event, or after running some callbacks.
-      // more = uv_loop_alive(&thread->getLoop());
-    } while (more == true);
-    // PERFORMANCE_MARK(&env, LOOP_EXIT);
+      do {
+        uv_run(&thread->getLoop(), UV_RUN_ONCE);
+
+        // v8_platform.DrainVMTasks(isolate);
+
+        more = uv_loop_alive(&thread->getLoop()) && thread->getLive();
+        if (more) {
+          HandleScope handle_scope(isolate);
+          asyncResource.MakeCallback(asyncFunction, 0, nullptr);
+        }
+        
+        // EmitBeforeExit(env);
+
+        // Emit `beforeExit` if the loop became alive either after emitting
+        // event, or after running some callbacks.
+        // more = uv_loop_alive(&thread->getLoop());
+      } while (more == true);
+      // PERFORMANCE_MARK(&env, LOOP_EXIT);
+    }
   }
 
   thread->removeThreadGlobal();
