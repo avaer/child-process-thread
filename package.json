@@ -5,8 +5,8 @@
   "main": "index.js",
   "dependencies": {
     "nan": "^2.8.0",
-    "raw-buffer": "0.0.7",
-    "smiggles": "0.0.18"
+    "raw-buffer": "0.0.8",
+    "smiggles": "0.0.19"
   },
   "devDependencies": {},
   "scripts": {
