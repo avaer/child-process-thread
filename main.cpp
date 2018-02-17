@@ -204,6 +204,8 @@ inline int Start(
       // v8_platform.DrainVMTasks(isolate);
 
       more = uv_loop_alive(&thread->getLoop()) && thread->getLive();
+      if (more)
+        continue;
 
       {
         HandleScope handle_scope(isolate);
