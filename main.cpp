@@ -27,6 +27,14 @@ namespace childProcessThread {
 
 uv_key_t threadKey;
 
+void walkHandlePruneFn(uv_handle_t *handle, void *arg) {
+  if (uv_is_active(handle)) {
+    if (handle->type == 16) { // UV_SIGNAL
+      uv_close(handle, nullptr);
+    }
+  }
+}
+
 class QueueEntry {
 public:
   QueueEntry(uintptr_t address, size_t size) : address(address), size(size) {}
@@ -153,6 +161,8 @@ inline int Start(
   // env->Start(argc, argv, exec_argc, exec_argv, v8_is_profiling);
 
   LoadEnvironment(env);
+
+  uv_walk(&thread->getLoop(), walkHandlePruneFn, nullptr);
 
   /* const char* path = argc > 1 ? argv[1] : nullptr;
   StartInspector(&env, path, debug_options);
