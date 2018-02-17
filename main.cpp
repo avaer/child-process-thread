@@ -133,8 +133,6 @@ inline int Start(
       Local<Object> exportsObj = Nan::New<Object>();
       Init(exportsObj);
 
-      // XXX
-
       importsObj->Set(Nan::New<String>(name).ToLocalChecked(), exportsObj);
     }
     global->Set(JS_STR("imports"), importsObj);
