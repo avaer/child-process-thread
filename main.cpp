@@ -13,6 +13,10 @@
 #include <memory>
 #include <map>
 
+#if _WIN32
+#include <Windows.h>
+#endif
+
 using namespace v8;
 using namespace node;
 using namespace std;
@@ -270,19 +274,24 @@ inline int Start(Thread *thread,
     Locker locker(isolate);
     Isolate::Scope isolate_scope(isolate);
     HandleScope handle_scope(isolate);
-    IsolateData *isolate_data = CreateIsolateData(isolate, &thread->getLoop());
-    /* IsolateData isolate_data(
-        isolate,
-        event_loop,
-        // v8_platform.Platform(),
-        nullptr,
-        allocator.zero_fill_field());
-    if (track_heap_objects) {
+
+#if _WIN32
+    HMODULE handle = GetModuleHandle(nullptr);
+    FARPROC address = GetProcAddress(handle, "?GetCurrentPlatform@V8@internal@v8@@SAPEAVPlatform@3@XZ");
+    Platform *(*GetCurrentPlatform)(void) = (Platform *(*)(void))address;
+    MultiIsolatePlatform *platform = (MultiIsolatePlatform *)GetCurrentPlatform();
+#else
+    MultiIsolatePlatform *platform = CreatePlatform(0, nullptr);
+#endif
+    IsolateData *isolate_data = CreateIsolateData(isolate, &thread->getLoop(), platform);
+
+    /* if (track_heap_objects) {
       isolate->GetHeapProfiler()->StartTrackingHeapObjects(true);
     } */
     exit_code = Start(thread, isolate, isolate_data, argc, argv, exec_argc, exec_argv);
 
     FreeIsolateData(isolate_data);
+    FreePlatform(platform);
   }
 
   /* {
