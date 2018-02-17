@@ -6,7 +6,7 @@
   "dependencies": {
     "nan": "^2.8.0",
     "raw-buffer": "0.0.7",
-    "smiggles": "0.0.17"
+    "smiggles": "0.0.18"
   },
   "devDependencies": {},
   "scripts": {
