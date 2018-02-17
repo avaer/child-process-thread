@@ -108,6 +108,18 @@ private:
   bool live;
 };
 
+bool ShouldAbortOnUncaughtException(Isolate *isolate) {
+  return false;
+}
+void OnMessage(Local<Message> message, Local<Value> error) {
+  Nan::HandleScope handleScope;
+  
+  Thread *thread = Thread::getCurrentThread();
+  Local<Object> global = thread->getThreadGlobal();
+  Local<Object> processObj = Local<Object>::Cast(global->Get(JS_STR("process")));
+  Local<Function> fatalExceptionFn = Local<Function>::Cast(processObj->Get(JS_STR("_fatalException")));
+  fatalExceptionFn->Call(processObj, 1, &error);
+}
 
 inline int Start(
   Thread *thread, Isolate *isolate, IsolateData *isolate_data,
@@ -242,8 +254,8 @@ inline int Start(Thread *thread,
   if (isolate == nullptr)
     return 12;  // Signal internal error.
 
-  // isolate->AddMessageListener(OnMessage);
-  // isolate->SetAbortOnUncaughtExceptionCallback(ShouldAbortOnUncaughtException);
+  isolate->AddMessageListener(OnMessage);
+  isolate->SetAbortOnUncaughtExceptionCallback(ShouldAbortOnUncaughtException);
   // isolate->SetAutorunMicrotasks(false);
   // isolate->SetFatalErrorHandler(OnFatalError);
 
