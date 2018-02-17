@@ -108,15 +108,6 @@ private:
   bool live;
 };
 
-/* static Mutex node_isolate_mutex;
-static v8::Isolate *node_isolate; */
-
-/* bool ShouldAbortOnUncaughtException(Isolate* isolate) {
-  HandleScope scope(isolate);
-  Environment* env = Environment::GetCurrent(isolate);
-  return env->should_abort_on_uncaught_toggle()[0] &&
-         !env->inside_should_not_abort_on_uncaught_scope();
-} */
 
 inline int Start(
   Thread *thread, Isolate *isolate, IsolateData *isolate_data,
