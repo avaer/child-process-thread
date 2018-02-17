@@ -341,7 +341,8 @@ void messageAsyncInCb(uv_async_t *handle) {
   if (onthreadmessageValue->IsFunction()) {
     Local<Function> onthreadmessageFn = Local<Function>::Cast(onthreadmessageValue);
 
-    for (size_t i = 0; i < messageQueue.size(); i++) {
+    size_t numMessages = messageQueue.size();
+    for (size_t i = 0; i < numMessages; i++) {
       const QueueEntry &queueEntry = messageQueue.front();
       messageQueue.pop();
 
@@ -367,7 +368,8 @@ void messageAsyncOutCb(uv_async_t *handle) {
   if (onthreadmessageValue->IsFunction()) {
     Local<Function> onthreadmessageFn = Local<Function>::Cast(onthreadmessageValue);
 
-    for (size_t i = 0; i < messageQueue.size(); i++) {
+    size_t numMessages = messageQueue.size();
+    for (size_t i = 0; i < numMessages; i++) {
       const QueueEntry &queueEntry = messageQueue.front();
       messageQueue.pop();
 
