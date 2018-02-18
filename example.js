@@ -1,11 +1,10 @@
 const path = require('path');
 const childProcessThread = require('.');
-const RawBuffer = require('raw-buffer');
-const smiggles = require('smiggles');
 
 console.log('lol 0');
 
 t1 = childProcessThread.fork(path.join(__dirname, 'example-worker1.js'));
+console.log('lol 1');
 t2 = childProcessThread.fork(path.join(__dirname, 'example-worker2.js'));
 
 o = {
@@ -18,13 +17,13 @@ t1.onmessage = m => {
 };
 
 setTimeout(() => {
-  console.log('lol 3');
+  console.log('lol 2');
 
   t1.terminate();
-  console.log('lol 4');
+  console.log('lol 3');
   t2.cancel();
 
-  console.log('lol 5');
+  console.log('lol 4');
 
   // coerce thread destruction
   t1 = null;
@@ -34,6 +33,8 @@ setTimeout(() => {
       buffer: new ArrayBuffer(1024 * 1024),
     };
   }
+
+  console.log('lol 5');
 
   setTimeout(() => {
     console.log('lol 6');
