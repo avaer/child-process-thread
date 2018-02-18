@@ -292,7 +292,10 @@ inline int Start(Thread *thread,
     exit_code = Start(thread, isolate, isolate_data, argc, argv, exec_argc, exec_argv);
 
     FreeIsolateData(isolate_data);
+#if _WIN32
+#else
     FreePlatform(platform);
+#endif
   }
 
   /* {
