@@ -53,7 +53,6 @@ class Thread : public Nan::ObjectWrap {
 public:
   static Handle<Object> Initialize();
   const string &getJsPath() const;
-  const vector<pair<string, uintptr_t>> &getImports() const;
   pthread_t &getThread();
   uv_loop_t &getLoop();
   unique_ptr<uv_async_t> &getExitAsync();
@@ -76,6 +75,7 @@ public:
 
   static const string &getChildJsPath();
   static void setChildJsPath(const string &childJsPath);
+  static const vector<pair<string, uintptr_t>> &getNativeRequires();
   static Thread *getThreadByKey(uintptr_t key);
   static void setThreadByKey(uintptr_t key, Thread *thread);
   static void removeThreadByKey(uintptr_t key);
@@ -83,22 +83,24 @@ public:
   static void setCurrentThread(Thread *thread);
   static uv_loop_t *getCurrentEventLoop();
 
-  Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &imports);
+  Thread(const string &jsPath);
   ~Thread();
   static NAN_METHOD(New);
   static NAN_METHOD(Fork);
   static NAN_METHOD(SetChildJsPath);
+  static NAN_METHOD(SetNativeRequire);
   static NAN_METHOD(Terminate);
   static NAN_METHOD(Cancel);
+  static NAN_METHOD(RequireNative);
   static NAN_METHOD(PostThreadMessageIn);
   static NAN_METHOD(PostThreadMessageOut);
 
 private:
   static string childJsPath;
   static map<uintptr_t, Thread*> threadMap;
+  static vector<pair<string, uintptr_t>> nativeRequires;
 
   string jsPath;
-  vector<pair<string, uintptr_t>> imports;
   uv_loop_t loop;
   uv_mutex_t mutex;
   unique_ptr<uv_async_t> exitAsync;
@@ -137,21 +139,7 @@ inline int Start(
 
   {
     Local<Object> global = context->Global();
-
-    Local<Object> importsObj = Nan::New<Object>();
-    const vector<pair<string, uintptr_t>> imports = thread->getImports();
-    for (size_t i = 0; i < imports.size(); i++) {
-      const pair<string, uintptr_t> &import = imports[i];
-      const string &name = import.first;
-      const uintptr_t address = import.second;
-
-      void (*Init)(Handle<Object> exports) = (void (*)(Handle<Object>))address;
-      Local<Object> exportsObj = Nan::New<Object>();
-      Init(exportsObj);
-
-      importsObj->Set(Nan::New<String>(name).ToLocalChecked(), exportsObj);
-    }
-    global->Set(JS_STR("imports"), importsObj);
+    global->Set(JS_STR("requireNative"), Nan::New<Function>(Thread::RequireNative));
     global->Set(JS_STR("onthreadmessage"), Nan::Null());
     global->Set(JS_STR("postThreadMessage"), Nan::New<Function>(Thread::PostThreadMessageOut));
 
@@ -421,14 +409,12 @@ Handle<Object> Thread::Initialize() {
   forkFn->Set(JS_STR("Thread"), ctorFn);
   ctorFn->Set(JS_STR("fork"), forkFn);
   ctorFn->Set(JS_STR("setChildJsPath"), Nan::New<Function>(Thread::SetChildJsPath));
+  ctorFn->Set(JS_STR("setNativeRequire"), Nan::New<Function>(Thread::SetNativeRequire));
 
   return scope.Escape(ctorFn);
 }
 const string &Thread::getJsPath() const {
   return jsPath;
-}
-const vector<pair<string, uintptr_t>> &Thread::getImports() const {
-  return imports;
 }
 pthread_t &Thread::getThread() {
   return thread;
@@ -517,6 +503,9 @@ const string &Thread::getChildJsPath() {
 void Thread::setChildJsPath(const string &childJsPath) {
   Thread::childJsPath = childJsPath;
 }
+const vector<pair<string, uintptr_t>> &Thread::getNativeRequires() {
+  return nativeRequires;
+}
 Thread *Thread::getThreadByKey(uintptr_t key) {
   return Thread::threadMap.at(key);
 }
@@ -542,7 +531,7 @@ uv_loop_t *Thread::getCurrentEventLoop() {
   }
 }
 
-Thread::Thread(const string &jsPath, const vector<pair<string, uintptr_t>> &imports) : jsPath(jsPath), imports(imports) {
+Thread::Thread(const string &jsPath) : jsPath(jsPath) {
   uv_loop_init(&loop);
   uv_mutex_init(&mutex);
 
@@ -563,7 +552,7 @@ Thread::~Thread() {}
 NAN_METHOD(Thread::New) {
   Nan::HandleScope scope;
 
-  if (info[0]->IsString() && info[1]->IsObject()) {
+  if (info[0]->IsString()) {
     Local<Object> rawThreadObj = info.This();
 
     Local<String> jsPathValue = info[0]->ToString();
@@ -571,23 +560,7 @@ NAN_METHOD(Thread::New) {
     size_t length = jsPathValueUtf8.length();
     string jsPath(*jsPathValueUtf8, length);
 
-    Local<Object> importsObject = Local<Object>::Cast(info[1]);
-    Local<Array> importsObjectKeys = importsObject->GetOwnPropertyNames();
-    vector<pair<string, uintptr_t>> imports;
-    for (size_t i = 0; i < importsObjectKeys->Length(); i++) {
-      Local<String> key = Local<String>::Cast(importsObjectKeys->Get(i));
-      Local<Number> value = Local<Number>::Cast(importsObject->Get(key));
-
-      String::Utf8Value keyValueUtf8(key);
-      string importName(*keyValueUtf8, keyValueUtf8.length());
-
-      double numberValue = value->NumberValue();
-      uintptr_t address = *reinterpret_cast<uintptr_t*>(&numberValue);
-
-      imports.emplace_back(importName, address);
-    }
-
-    Thread *thread = new Thread(jsPath, imports);
+    Thread *thread = new Thread(jsPath);
     thread->Wrap(rawThreadObj);
     thread->setThreadObject(rawThreadObj);
 
@@ -597,11 +570,10 @@ NAN_METHOD(Thread::New) {
   }
 }
 NAN_METHOD(Thread::Fork) {
-  if (info[0]->IsString() && info[1]->IsObject()) {
+  if (info[0]->IsString()) {
     Local<Function> threadConstructor = Local<Function>::Cast(info.Callee()->Get(JS_STR("Thread")));
     Local<Value> argv[] = {
       info[0],
-      info[1],
     };
     Local<Value> threadObj = threadConstructor->NewInstance(sizeof(argv)/sizeof(argv[0]), argv);
 
@@ -621,6 +593,18 @@ NAN_METHOD(Thread::SetChildJsPath) {
   } else {
     Nan::ThrowError("Invalid arguments");
   }
+}
+NAN_METHOD(Thread::SetNativeRequire) {
+  Thread *thread = Thread::getCurrentThread();
+  
+  Local<String> requireNameValue = info[0]->ToString();
+  String::Utf8Value requireNameUtf8(requireNameValue);
+  string requireName(*requireNameUtf8, requireNameUtf8.length());
+
+  Local<Array> requireAddressValue = Local<Array>::Cast(info[1]);
+  uintptr_t requireAddress = ((uint64_t)requireAddressValue->Get(0)->Uint32Value() << 32) | ((uint64_t)requireAddressValue->Get(1)->Uint32Value() & 0xFFFFFFFF);
+  
+  nativeRequires.emplace_back(requireName, requireAddress);
 }
 NAN_METHOD(Thread::Terminate) {
   Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
@@ -642,11 +626,11 @@ NAN_METHOD(Thread::Terminate) {
 
   // clean up remote message handles
   uv_walk(&thread->getLoop(), walkHandleCleanupFn, nullptr);
-
+  
   // clean up local thread references
   Thread::removeThreadByKey((uintptr_t)messageAsyncOut);
   thread->removeThreadObject();
-
+  
   info.GetReturnValue().Set(Nan::New<Integer>(result == 0 ? (*(int *)retval) : 1));
 }
 NAN_METHOD(Thread::Cancel) {
@@ -663,15 +647,39 @@ NAN_METHOD(Thread::Cancel) {
   uv_close((uv_handle_t *)messageAsyncOut, closeHandleFn);
 
   // release ownership of handles
-  thread->getExitAsync().release();
-  thread->getMessageAsyncIn().release();
+  // thread->getExitAsync().release();
+  // thread->getMessageAsyncIn().release();
 
   // clean up remote message handles
-  uv_walk(&thread->getLoop(), walkHandleCleanupFn, nullptr);
+  // uv_walk(&thread->getLoop(), walkHandleCleanupFn, nullptr);
 
   // clean up local thread references
   Thread::removeThreadByKey((uintptr_t)messageAsyncOut);
   thread->removeThreadObject();
+}
+NAN_METHOD(Thread::RequireNative) {
+  Thread *thread = Thread::getCurrentThread();
+  
+  Local<String> requireNameValue = info[0]->ToString();
+  String::Utf8Value requireNameUtf8(requireNameValue);
+  string requireName(*requireNameUtf8, requireNameUtf8.length());
+  
+  const vector<pair<string, uintptr_t>> &requires = Thread::getNativeRequires();
+  for (size_t i = 0; i < requires.size(); i++) {
+    const pair<string, uintptr_t> &require = requires[i];
+    const string &name = require.first;
+    const uintptr_t address = require.second;
+    
+    if (name == requireName) {
+      void (*Init)(Handle<Object> exports) = (void (*)(Handle<Object>))address;
+      Local<Object> exportsObj = Nan::New<Object>();
+      Init(exportsObj);
+      
+      return info.GetReturnValue().Set(exportsObj);
+    }
+  }
+  
+  return Nan::ThrowError("Native module not found");
 }
 NAN_METHOD(Thread::PostThreadMessageIn) {
   if (info[0]->IsArrayBuffer()) {
@@ -715,6 +723,7 @@ void Init(Handle<Object> exports) {
 }
 string Thread::childJsPath;
 map<uintptr_t, Thread*> Thread::threadMap;
+vector<pair<string, uintptr_t>> Thread::nativeRequires;
 
 NODE_MODULE(NODE_GYP_MODULE_NAME, Init)
 

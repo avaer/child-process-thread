@@ -8,11 +8,8 @@ smiggles.bind({RawBuffer});
 
 const rawBufferSymbol = Symbol();
 
-Thread.fork = (fork => function(jsPath, imports = {}) {
-  imports['RawBuffer'] = RawBuffer.initFunctionAddress;
-  return fork.call(this, jsPath, imports);
-})(Thread.fork);
 Thread.setChildJsPath(path.join(__dirname, 'child.js'));
+Thread.setNativeRequire('RawBuffer', RawBuffer.initFunctionAddress);
 Thread.prototype.postMessage = function(m, transferList, arrayBuffer) {
   arrayBuffer = smiggles.serialize(m, transferList, arrayBuffer);
   new RawBuffer(arrayBuffer).toAddress(); // externalize
@@ -26,6 +23,5 @@ Thread.prototype.onthreadmessage = function(arrayBuffer) {
     this.onmessage(new MessageEvent(m));
   }
 };
-Thread.bind = bindings => smiggles.bind(bindings);
 
 module.exports = Thread;
