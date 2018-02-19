@@ -23,5 +23,6 @@ Thread.prototype.onthreadmessage = function(arrayBuffer) {
     this.onmessage(new MessageEvent(m));
   }
 };
+Thread.bind = smiggles.bind;
 
 module.exports = Thread;
