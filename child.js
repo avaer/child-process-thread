@@ -2,8 +2,6 @@ const smiggles = require('smiggles');
 const MessageEvent = require('./message-event');
 const {RawBuffer} = requireNative('RawBuffer');
 
-console.log('got raw buffer', RawBuffer);
-
 smiggles.bind({RawBuffer});
 
 const rawBufferSymbol = Symbol();
