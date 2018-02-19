@@ -13,7 +13,7 @@ o = {
 
 t1.postMessage(o);
 t1.onmessage = m => {
-  console.log('got main thread message', m);
+  console.log('got main thread message', m.data);
 };
 
 setTimeout(() => {
