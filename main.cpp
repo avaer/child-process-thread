@@ -596,15 +596,23 @@ NAN_METHOD(Thread::SetChildJsPath) {
 }
 NAN_METHOD(Thread::SetNativeRequire) {
   Thread *thread = Thread::getCurrentThread();
-  
-  Local<String> requireNameValue = info[0]->ToString();
-  String::Utf8Value requireNameUtf8(requireNameValue);
-  string requireName(*requireNameUtf8, requireNameUtf8.length());
 
-  Local<Array> requireAddressValue = Local<Array>::Cast(info[1]);
-  uintptr_t requireAddress = ((uint64_t)requireAddressValue->Get(0)->Uint32Value() << 32) | ((uint64_t)requireAddressValue->Get(1)->Uint32Value() & 0xFFFFFFFF);
-  
-  nativeRequires.emplace_back(requireName, requireAddress);
+  if (info[0]->IsString() && info[1]->IsArray()) {
+    Local<String> requireNameValue = info[0]->ToString();
+    String::Utf8Value requireNameUtf8(requireNameValue);
+    string requireName(*requireNameUtf8, requireNameUtf8.length());
+
+    Local<Array> requireAddressValue = Local<Array>::Cast(info[1]);
+    uintptr_t requireAddress = ((uint64_t)requireAddressValue->Get(0)->Uint32Value() << 32) | ((uint64_t)requireAddressValue->Get(1)->Uint32Value() & 0xFFFFFFFF);
+
+    if (requireAddress) {
+      nativeRequires.emplace_back(requireName, requireAddress);
+    } else {
+      Nan::ThrowError("init function address cannot be null");
+    }
+  } else {
+    Nan::ThrowError("invalid arguments");
+  }
 }
 NAN_METHOD(Thread::Terminate) {
   Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
