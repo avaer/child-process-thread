@@ -15,6 +15,8 @@
 
 #if _WIN32
 #include <Windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 using namespace v8;
@@ -267,11 +269,12 @@ inline int Start(Thread *thread,
 #if _WIN32
     HMODULE handle = GetModuleHandle(nullptr);
     FARPROC address = GetProcAddress(handle, "?GetCurrentPlatform@V8@internal@v8@@SAPEAVPlatform@3@XZ");
+#else
+    void *handle = dlopen(NULL, RTLD_LAZY);
+    void *address = dlsym(handle, "_ZN2v88internal2V818GetCurrentPlatformEv");
+#endif
     Platform *(*GetCurrentPlatform)(void) = (Platform *(*)(void))address;
     MultiIsolatePlatform *platform = (MultiIsolatePlatform *)GetCurrentPlatform();
-#else
-    MultiIsolatePlatform *platform = CreatePlatform(0, nullptr);
-#endif
     IsolateData *isolate_data = CreateIsolateData(isolate, &thread->getLoop(), platform);
 
     /* if (track_heap_objects) {
@@ -280,10 +283,7 @@ inline int Start(Thread *thread,
     exit_code = Start(thread, isolate, isolate_data, argc, argv, exec_argc, exec_argv);
 
     FreeIsolateData(isolate_data);
-#if _WIN32
-#else
-    FreePlatform(platform);
-#endif
+    // FreePlatform(platform);
   }
 
   /* {
