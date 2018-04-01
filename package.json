@@ -8,7 +8,9 @@
     "raw-buffer": "0.0.11",
     "smiggles": "0.0.20"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "window-fetch": "0.0.6"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "install": "node-gyp rebuild"

@@ -38,5 +38,5 @@ setTimeout(() => {
 
   setTimeout(() => {
     console.log('lol 6');
-  }, 1000);
-}, 200);
+  }, 100);
+}, 2000);
