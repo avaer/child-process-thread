@@ -61,12 +61,14 @@ public:
   unique_ptr<uv_async_t> &getMessageAsyncIn();
   unique_ptr<uv_async_t> &getMessageAsyncOut();
   uv_mutex_t &getMutex();
+  uv_sem_t &getDeasyncSem();
   void pushMessageIn(const QueueEntry &queueEntry);
   void pushMessageOut(const QueueEntry &queueEntry);
   queue<QueueEntry> getMessageQueueIn();
   queue<QueueEntry> getMessageQueueOut();
 
   void setThreadGlobal(Local<Object> global);
+  void setDeasyncResolveFn(Local<Function> deasyncResolveFn);
   Local<Object> getThreadGlobal();
   void removeThreadGlobal();
   void setThreadObject(Local<Object> threadObj);
@@ -96,6 +98,8 @@ public:
   static NAN_METHOD(RequireNative);
   static NAN_METHOD(PostThreadMessageIn);
   static NAN_METHOD(PostThreadMessageOut);
+  static NAN_METHOD(Deasync);
+  static NAN_METHOD(DeasyncResolve);
 
 private:
   static string childJsPath;
@@ -105,6 +109,7 @@ private:
   string jsPath;
   uv_loop_t loop;
   uv_mutex_t mutex;
+  uv_sem_t deasyncSem;
   unique_ptr<uv_async_t> exitAsync;
   unique_ptr<uv_async_t> messageAsyncIn;
   unique_ptr<uv_async_t> messageAsyncOut;
@@ -113,6 +118,7 @@ private:
   Persistent<Object> threadObj;
   queue<QueueEntry> messageQueueIn;
   queue<QueueEntry> messageQueueOut;
+  Persistent<Function> deasyncResolveFn;
   bool live;
 };
 
@@ -144,9 +150,12 @@ inline int Start(
     global->Set(JS_STR("requireNative"), Nan::New<Function>(Thread::RequireNative));
     global->Set(JS_STR("onthreadmessage"), Nan::Null());
     global->Set(JS_STR("postThreadMessage"), Nan::New<Function>(Thread::PostThreadMessageOut));
+    global->Set(JS_STR("deasync"), Nan::New<Function>(Thread::Deasync));
 
     thread->setThreadGlobal(global);
   }
+
+  thread->setDeasyncResolveFn(Nan::New<Function>(Thread::DeasyncResolve));
 
   Environment *env = CreateEnvironment(isolate_data, context, argc, argv, exec_argc, exec_argv);
 
@@ -434,6 +443,9 @@ unique_ptr<uv_async_t> &Thread::getMessageAsyncOut() {
 uv_mutex_t &Thread::getMutex() {
   return mutex;
 }
+uv_sem_t &Thread::getDeasyncSem() {
+  return deasyncSem;
+}
 void Thread::pushMessageIn(const QueueEntry &queueEntry) {
   uv_mutex_lock(&mutex);
 
@@ -474,6 +486,9 @@ queue<QueueEntry> Thread::getMessageQueueOut() {
 }
 void Thread::setThreadGlobal(Local<Object> global) {
   this->global.Reset(Isolate::GetCurrent(), global);
+}
+void Thread::setDeasyncResolveFn(Local<Function> deasyncResolveFn) {
+  this->deasyncResolveFn.Reset(Isolate::GetCurrent(), deasyncResolveFn);
 }
 Local<Object> Thread::getThreadGlobal() {
   return Nan::New(global);
@@ -534,6 +549,7 @@ uv_loop_t *Thread::getCurrentEventLoop() {
 Thread::Thread(const string &jsPath) : jsPath(jsPath) {
   uv_loop_init(&loop);
   uv_mutex_init(&mutex);
+  uv_sem_init(&deasyncSem, 0);
 
   exitAsync = unique_ptr<uv_async_t>(new uv_async_t());
   uv_async_init(&loop, exitAsync.get(), exitAsyncCb);
@@ -722,6 +738,27 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
   } else {
     return Nan::ThrowError("invalid arguments");
   }
+}
+NAN_METHOD(Thread::Deasync) {
+  if (info[0]->IsFunction()) {
+    Thread *thread = Thread::getCurrentThread();
+
+    Local<Function> fn = Local<Function>::Cast(info[0]);
+    Local<Function> localDeasyncResolveFn = Nan::New(thread->deasyncResolveFn);
+    Local<Value> args[] = {
+      localDeasyncResolveFn,
+    };
+    fn->Call(Nan::Null(), sizeof(args)/sizeof(args[0]), args);
+
+    uv_sem_wait(&thread->getDeasyncSem());
+  } else {
+    return Nan::ThrowError("invalid arguments");
+  }
+}
+NAN_METHOD(Thread::DeasyncResolve) {
+  Thread *thread = Thread::getCurrentThread();
+
+  uv_sem_post(&thread->getDeasyncSem());
 }
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
