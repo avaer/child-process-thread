@@ -15,6 +15,16 @@ deasync(cb => {
 });
 console.log('deasync 4');
 
+try {
+  deasync(cb => {
+    console.log('deasync 5');
+
+    cb({lol: 'zol'});
+  });
+} catch(err) {
+  console.log('deasync 6', err);
+}
+
 setTimeout(() => {
   console.log('worker 2 1');
 }, 100);
