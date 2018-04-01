@@ -120,6 +120,7 @@ private:
   queue<QueueEntry> messageQueueOut;
   Persistent<Function> deasyncResolveFn;
   bool live;
+  Persistent<Value> deasyncErr;
 };
 
 bool ShouldAbortOnUncaughtException(Isolate *isolate) {
@@ -743,6 +744,8 @@ NAN_METHOD(Thread::Deasync) {
   if (info[0]->IsFunction()) {
     Thread *thread = Thread::getCurrentThread();
 
+    thread->deasyncErr.Reset();
+
     Local<Function> fn = Local<Function>::Cast(info[0]);
     Local<Function> localDeasyncResolveFn = Nan::New(thread->deasyncResolveFn);
     Local<Value> args[] = {
@@ -751,12 +754,22 @@ NAN_METHOD(Thread::Deasync) {
     fn->Call(Nan::Null(), sizeof(args)/sizeof(args[0]), args);
 
     uv_sem_wait(&thread->getDeasyncSem());
+
+    if (!thread->deasyncErr.IsEmpty()) {
+      Local<Value> localDeasyncErr = Nan::New(thread->deasyncErr);
+
+      if (localDeasyncErr->BooleanValue()) {
+        Nan::ThrowError(localDeasyncErr);
+      }
+    }
   } else {
-    return Nan::ThrowError("invalid arguments");
+    Nan::ThrowError("invalid arguments");
   }
 }
 NAN_METHOD(Thread::DeasyncResolve) {
   Thread *thread = Thread::getCurrentThread();
+
+  thread->deasyncErr.Reset(Isolate::GetCurrent(), info[0]);
 
   uv_sem_post(&thread->getDeasyncSem());
 }
