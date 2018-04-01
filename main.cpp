@@ -61,14 +61,12 @@ public:
   unique_ptr<uv_async_t> &getMessageAsyncIn();
   unique_ptr<uv_async_t> &getMessageAsyncOut();
   uv_mutex_t &getMutex();
-  uv_sem_t &getDeasyncSem();
   void pushMessageIn(const QueueEntry &queueEntry);
   void pushMessageOut(const QueueEntry &queueEntry);
   queue<QueueEntry> getMessageQueueIn();
   queue<QueueEntry> getMessageQueueOut();
 
   void setThreadGlobal(Local<Object> global);
-  void setDeasyncResolveFn(Local<Function> deasyncResolveFn);
   Local<Object> getThreadGlobal();
   void removeThreadGlobal();
   void setThreadObject(Local<Object> threadObj);
@@ -99,7 +97,6 @@ public:
   static NAN_METHOD(PostThreadMessageIn);
   static NAN_METHOD(PostThreadMessageOut);
   static NAN_METHOD(Deasync);
-  static NAN_METHOD(DeasyncResolve);
 
 private:
   static string childJsPath;
@@ -109,7 +106,6 @@ private:
   string jsPath;
   uv_loop_t loop;
   uv_mutex_t mutex;
-  uv_sem_t deasyncSem;
   unique_ptr<uv_async_t> exitAsync;
   unique_ptr<uv_async_t> messageAsyncIn;
   unique_ptr<uv_async_t> messageAsyncOut;
@@ -118,9 +114,7 @@ private:
   Persistent<Object> threadObj;
   queue<QueueEntry> messageQueueIn;
   queue<QueueEntry> messageQueueOut;
-  Persistent<Function> deasyncResolveFn;
   bool live;
-  Persistent<Value> deasyncErr;
 };
 
 bool ShouldAbortOnUncaughtException(Isolate *isolate) {
@@ -155,8 +149,6 @@ inline int Start(
 
     thread->setThreadGlobal(global);
   }
-
-  thread->setDeasyncResolveFn(Nan::New<Function>(Thread::DeasyncResolve));
 
   Environment *env = CreateEnvironment(isolate_data, context, argc, argv, exec_argc, exec_argv);
 
@@ -444,9 +436,6 @@ unique_ptr<uv_async_t> &Thread::getMessageAsyncOut() {
 uv_mutex_t &Thread::getMutex() {
   return mutex;
 }
-uv_sem_t &Thread::getDeasyncSem() {
-  return deasyncSem;
-}
 void Thread::pushMessageIn(const QueueEntry &queueEntry) {
   uv_mutex_lock(&mutex);
 
@@ -487,9 +476,6 @@ queue<QueueEntry> Thread::getMessageQueueOut() {
 }
 void Thread::setThreadGlobal(Local<Object> global) {
   this->global.Reset(Isolate::GetCurrent(), global);
-}
-void Thread::setDeasyncResolveFn(Local<Function> deasyncResolveFn) {
-  this->deasyncResolveFn.Reset(Isolate::GetCurrent(), deasyncResolveFn);
 }
 Local<Object> Thread::getThreadGlobal() {
   return Nan::New(global);
@@ -550,7 +536,6 @@ uv_loop_t *Thread::getCurrentEventLoop() {
 Thread::Thread(const string &jsPath) : jsPath(jsPath) {
   uv_loop_init(&loop);
   uv_mutex_init(&mutex);
-  uv_sem_init(&deasyncSem, 0);
 
   exitAsync = unique_ptr<uv_async_t>(new uv_async_t());
   uv_async_init(&loop, exitAsync.get(), exitAsyncCb);
@@ -741,37 +726,14 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
   }
 }
 NAN_METHOD(Thread::Deasync) {
-  if (info[0]->IsFunction()) {
-    Thread *thread = Thread::getCurrentThread();
-
-    thread->deasyncErr.Reset();
-
-    Local<Function> fn = Local<Function>::Cast(info[0]);
-    Local<Function> localDeasyncResolveFn = Nan::New(thread->deasyncResolveFn);
-    Local<Value> args[] = {
-      localDeasyncResolveFn,
-    };
-    fn->Call(Nan::Null(), sizeof(args)/sizeof(args[0]), args);
-
-    uv_sem_wait(&thread->getDeasyncSem());
-
-    if (!thread->deasyncErr.IsEmpty()) {
-      Local<Value> localDeasyncErr = Nan::New(thread->deasyncErr);
-
-      if (localDeasyncErr->BooleanValue()) {
-        Nan::ThrowError(localDeasyncErr);
-      }
-    }
-  } else {
-    Nan::ThrowError("invalid arguments");
-  }
-}
-NAN_METHOD(Thread::DeasyncResolve) {
   Thread *thread = Thread::getCurrentThread();
 
-  thread->deasyncErr.Reset(Isolate::GetCurrent(), info[0]);
+  uv_run(&thread->getLoop(), UV_RUN_ONCE);
 
-  uv_sem_post(&thread->getDeasyncSem());
+  Local<Object> asyncObj = Nan::New<Object>();
+  AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "asyncResource");
+  Local<Function> asyncFunction = Nan::New<Function>(nop);
+  asyncResource.MakeCallback(asyncFunction, 0, nullptr);
 }
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
