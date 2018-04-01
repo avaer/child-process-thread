@@ -6,24 +6,19 @@ onmessage = m => {
 };
 
 console.log('deasync 1', typeof deasync);
-deasync(cb => {
-  console.log('deasync 2', typeof cb);
+deasync();
+console.log('deasync 3');
 
-  cb();
-
-  console.log('deasync 3');
+let done = false;
+process.nextTick(() => {
+  done = true;
 });
-console.log('deasync 4');
-
-try {
-  deasync(cb => {
-    console.log('deasync 5');
-
-    cb({lol: 'zol'});
-  });
-} catch(err) {
-  console.log('deasync 6', err);
+while (!done) {
+  deasync();
+  console.log('check async', done);
 }
+
+console.log('deasync 4');
 
 setTimeout(() => {
   console.log('worker 2 1');
