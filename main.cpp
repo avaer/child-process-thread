@@ -96,7 +96,7 @@ public:
   static NAN_METHOD(RequireNative);
   static NAN_METHOD(PostThreadMessageIn);
   static NAN_METHOD(PostThreadMessageOut);
-  static NAN_METHOD(Deasync);
+  static NAN_METHOD(Tick);
 
 private:
   static string childJsPath;
@@ -145,7 +145,7 @@ inline int Start(
     global->Set(JS_STR("requireNative"), Nan::New<Function>(Thread::RequireNative));
     global->Set(JS_STR("onthreadmessage"), Nan::Null());
     global->Set(JS_STR("postThreadMessage"), Nan::New<Function>(Thread::PostThreadMessageOut));
-    global->Set(JS_STR("deasync"), Nan::New<Function>(Thread::Deasync));
+    global->Set(JS_STR("tick"), Nan::New<Function>(Thread::Tick));
 
     thread->setThreadGlobal(global);
   }
@@ -725,13 +725,13 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
     return Nan::ThrowError("invalid arguments");
   }
 }
-NAN_METHOD(Thread::Deasync) {
+NAN_METHOD(Thread::Tick) {
   Thread *thread = Thread::getCurrentThread();
 
   uv_run(&thread->getLoop(), UV_RUN_ONCE);
 
   Local<Object> asyncObj = Nan::New<Object>();
-  AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "asyncResource");
+  AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "tickResource");
   Local<Function> asyncFunction = Nan::New<Function>(nop);
   asyncResource.MakeCallback(asyncFunction, 0, nullptr);
 }

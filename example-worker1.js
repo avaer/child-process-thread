@@ -5,20 +5,20 @@ onmessage = m => {
   postMessage(m);
 };
 
-console.log('deasync 1', typeof deasync);
-deasync();
-console.log('deasync 3');
+console.log('tick 1', typeof tick);
+tick();
+console.log('tick 3');
 
 let done = false;
 process.nextTick(() => {
   done = true;
 });
 while (!done) {
-  deasync();
-  console.log('check async', done);
+  tick();
+  console.log('check tick done', done);
 }
 
-console.log('deasync 4');
+console.log('tick 4');
 
 setTimeout(() => {
   console.log('worker 2 1');
