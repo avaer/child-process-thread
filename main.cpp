@@ -727,13 +727,7 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
 }
 NAN_METHOD(Thread::Tick) {
   Thread *thread = Thread::getCurrentThread();
-
   uv_run(&thread->getLoop(), UV_RUN_ONCE);
-
-  Local<Object> asyncObj = Nan::New<Object>();
-  AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "tickResource");
-  Local<Function> asyncFunction = Nan::New<Function>(nop);
-  asyncResource.MakeCallback(asyncFunction, 0, nullptr);
 }
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
