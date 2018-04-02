@@ -1,6 +1,6 @@
 {
   "name": "child-process-thread",
-  "version": "0.0.37",
+  "version": "0.0.38",
   "description": "Child process in a thread for node",
   "main": "index.js",
   "dependencies": {
