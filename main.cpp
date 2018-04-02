@@ -145,7 +145,6 @@ inline int Start(
     global->Set(JS_STR("requireNative"), Nan::New<Function>(Thread::RequireNative));
     global->Set(JS_STR("onthreadmessage"), Nan::Null());
     global->Set(JS_STR("postThreadMessage"), Nan::New<Function>(Thread::PostThreadMessageOut));
-    global->Set(JS_STR("tick"), Nan::New<Function>(Thread::Tick));
 
     thread->setThreadGlobal(global);
   }
@@ -724,10 +723,6 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
   } else {
     return Nan::ThrowError("invalid arguments");
   }
-}
-NAN_METHOD(Thread::Tick) {
-  Thread *thread = Thread::getCurrentThread();
-  uv_run(&thread->getLoop(), UV_RUN_ONCE);
 }
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
