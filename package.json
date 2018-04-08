@@ -4,9 +4,9 @@
   "description": "Child process in a thread for node",
   "main": "index.js",
   "dependencies": {
-    "nan": "^2.8.0",
-    "raw-buffer": "0.0.12",
-    "smiggles": "0.0.21"
+    "nan": "^2.10.0",
+    "raw-buffer": "0.0.14",
+    "smiggles": "0.0.23"
   },
   "devDependencies": {
     "window-fetch": "0.0.6"
