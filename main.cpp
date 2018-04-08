@@ -148,6 +148,19 @@ inline int Start(
 
     thread->setThreadGlobal(global);
   }
+  
+  {
+#if _WIN32    
+    HMODULE handle = GetModuleHandle(nullptr);
+    FARPROC address = GetProcAddress(handle, "?FLAG_allow_natives_syntax@internal@v8@@3_NA");
+
+#else
+    void *handle = dlopen(NULL, RTLD_LAZY);      
+    void *address = dlsym(handle, "_ZN2v88internal25FLAG_allow_natives_syntaxE");
+#endif
+    bool *flag = (bool *)address;
+    *flag = true;
+  }
 
   Environment *env = CreateEnvironment(isolate_data, context, argc, argv, exec_argc, exec_argv);
 
@@ -320,8 +333,12 @@ static void *threadFn(void *arg) {
   char *jsPathArg = argsString + i;
   strncpy(jsPathArg, thread->getJsPath().c_str(), sizeof(argsString) - i);
   i += thread->getJsPath().length() + 1;
+  
+  char *allowNativesSynax = argsString + i;
+  strncpy(allowNativesSynax, "--allow_natives_syntax", sizeof(argsString) - i);
+  i += strlen(allowNativesSynax) + 1;
 
-  char *argv[] = {binPathArg, childJsPathArg, jsPathArg};
+  char *argv[] = {binPathArg, childJsPathArg, jsPathArg, allowNativesSynax};
   int argc = sizeof(argv)/sizeof(argv[0]);
   int retval = Start(thread, argc, argv, argc, argv);
 
@@ -407,7 +424,6 @@ Handle<Object> Thread::Initialize() {
   Local<Function> ctorFn = ctor->GetFunction();
 
   Local<Function> forkFn = Nan::New<Function>(Thread::Fork);
-  forkFn->Set(JS_STR("Thread"), ctorFn);
   ctorFn->Set(JS_STR("fork"), forkFn);
   ctorFn->Set(JS_STR("setChildJsPath"), Nan::New<Function>(Thread::SetChildJsPath));
   ctorFn->Set(JS_STR("setNativeRequire"), Nan::New<Function>(Thread::SetNativeRequire));
@@ -572,11 +588,11 @@ NAN_METHOD(Thread::New) {
 }
 NAN_METHOD(Thread::Fork) {
   if (info[0]->IsString()) {
-    Local<Function> threadConstructor = Local<Function>::Cast(info.Callee()->Get(JS_STR("Thread")));
+    Local<Function> threadConstructor = Local<Function>::Cast(info.This());
     Local<Value> argv[] = {
       info[0],
     };
-    Local<Value> threadObj = threadConstructor->NewInstance(sizeof(argv)/sizeof(argv[0]), argv);
+    Local<Value> threadObj = threadConstructor->NewInstance(Isolate::GetCurrent()->GetCurrentContext(), sizeof(argv)/sizeof(argv[0]), argv).ToLocalChecked();
 
     info.GetReturnValue().Set(threadObj);
   } else {
@@ -649,7 +665,7 @@ NAN_METHOD(Thread::Cancel) {
   pthread_cancel(thread->getThread());
 
   // wait for thread to exit
-  pthread_join(thread->getThread(), nullptr);
+  // pthread_join(thread->getThread(), nullptr);
 
   // close local message handle
   uv_async_t *messageAsyncOut = thread->getMessageAsyncOut().release();
