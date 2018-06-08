@@ -4,6 +4,34 @@ const RawBuffer = require('raw-buffer');
 const smiggles = require('smiggles');
 const MessageEvent = require('./message-event');
 
+function _getInfo({message, stack}) {
+  const xs = (stack || '').split('\n    at ');
+  if (xs.length > 1) {
+    let x = ((/[(](.+)[)]/).exec(xs[1])||[])[1];
+    if (x == null) {
+      x = xs[1];
+    }
+    let [_, filename, lineno] = ((/(.+)[:]([0-9]+)[:]/).exec(x)||[]);
+    if (lineno) {
+      lineno = parseInt(lineno);
+      if (isNaN(lineno)) {
+        lineno = null;
+      }
+    }
+    return {message, filename, lineno};
+  }
+  return {message};
+}
+
+class ErrorEvent {
+  constructor(e) {
+    Object.assign(this, _getInfo(e));
+    this.error = e;
+  }
+}
+
+module.exports = MessageEvent;
+
 smiggles.bind({RawBuffer});
 
 const rawBufferSymbol = Symbol();
@@ -20,7 +48,18 @@ Thread.prototype.onthreadmessage = function(arrayBuffer) {
 
   if (this.onmessage) {
     const m = smiggles.deserialize(arrayBuffer);
-    this.onmessage(new MessageEvent(m));
+    try {
+      this.onmessage(new MessageEvent(m));
+    }
+    catch (e) {
+      if (this.onerror) {
+        this.onerror(new ErrorEvent(e));
+      } else {
+        console.warn('Unhandled error in web worker:');
+        console.warn(e.message);
+        console.warn(e.stack);
+      }
+    }
   }
 };
 Thread.bind = smiggles.bind;
