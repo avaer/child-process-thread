@@ -25,8 +25,8 @@ function _getInfo({message, stack}) {
 
 class ErrorEvent {
   constructor(e) {
-    Object.assign(this, _getInfo(e));
     this.error = e;
+    Object.assign(this, _getInfo(e));
   }
 }
 
