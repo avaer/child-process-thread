@@ -13,7 +13,7 @@ function _getInfo({message, stack}) {
     }
     let [_, filename, lineno] = ((/(.+)[:]([0-9]+)[:]/).exec(x)||[]);
     if (lineno) {
-      lineno = parseInt(lineno);
+      lineno = parseInt(lineno, 10);
       if (isNaN(lineno)) {
         lineno = null;
       }
