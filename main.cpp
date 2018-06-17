@@ -236,7 +236,7 @@ inline int Start(
   RunAtExit(&env); */
   // uv_key_delete(&thread_local_env);
 
-  FreeEnvironment(env);
+  // FreeEnvironment(env); // XXX crashes on terminate; should just use native Worker
 
   /* v8_platform.DrainVMTasks(isolate);
   v8_platform.CancelVMTasks(isolate);
