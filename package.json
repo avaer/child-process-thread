@@ -6,7 +6,7 @@
   "dependencies": {
     "nan": "^2.10.0",
     "raw-buffer": "0.0.15",
-    "smiggles": "0.0.25"
+    "smiggles": "0.0.26"
   },
   "devDependencies": {
     "window-fetch": "0.0.6"
