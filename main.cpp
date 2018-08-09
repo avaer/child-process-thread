@@ -312,8 +312,8 @@ inline int Start(Thread *thread,
 }
 
 static void *threadFn(void *arg) {
-  pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, nullptr);
-  pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, nullptr);
+  //pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, nullptr);
+  //pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, nullptr);
 
   Thread *thread = (Thread *)arg;
   Thread::setCurrentThread(thread);
@@ -662,7 +662,7 @@ NAN_METHOD(Thread::Cancel) {
   Thread *thread = ObjectWrap::Unwrap<Thread>(info.This());
 
   // forcefully cancel thread
-  pthread_cancel(thread->getThread());
+  //pthread_cancel(thread->getThread());
 
   // wait for thread to exit
   // pthread_join(thread->getThread(), nullptr);
