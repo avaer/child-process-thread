@@ -20,6 +20,7 @@
         }],
      	['OS=="android"', {
 	      "cflags_cc":["-fPIC"],
+	      "defines": ["ANDROID"],
 	    }],
       ],
     }
