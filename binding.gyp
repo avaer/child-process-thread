@@ -18,6 +18,9 @@
           ],
           'defines': ['HAVE_CONFIG_H'],
         }],
+     	['OS=="android"', {
+	      "cflags_cc":["-fPIC"],
+	    }],
       ],
     }
   ]
