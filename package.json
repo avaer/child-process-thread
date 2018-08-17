@@ -9,7 +9,7 @@
     "smiggles": "0.0.26"
   },
   "devDependencies": {
-    "window-fetch": "0.0.6"
+    "window-fetch": "0.0.9"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
