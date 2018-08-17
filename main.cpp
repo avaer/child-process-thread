@@ -754,6 +754,14 @@ string Thread::childJsPath;
 map<uintptr_t, Thread*> Thread::threadMap;
 vector<pair<string, uintptr_t>> Thread::nativeRequires;
 
-NODE_MODULE(NODE_GYP_MODULE_NAME, Init)
-
 }
+
+#ifndef LUMIN
+NODE_MODULE(NODE_GYP_MODULE_NAME, childProcessThread::Init)
+#else
+extern "C" {
+  void node_register_module_child_process_thread(Local<Object> exports, Local<Value> module, Local<Context> context) {
+    childProcessThread::Init(exports);
+  }
+}
+#endif
