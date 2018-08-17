@@ -5,7 +5,7 @@
   "main": "index.js",
   "dependencies": {
     "nan": "^2.10.0",
-    "raw-buffer": "0.0.16",
+    "raw-buffer": "0.0.17",
     "smiggles": "0.0.26"
   },
   "devDependencies": {
