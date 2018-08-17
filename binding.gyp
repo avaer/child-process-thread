@@ -18,10 +18,13 @@
           ],
           'defines': ['HAVE_CONFIG_H'],
         }],
-     	['OS=="android"', {
-	      "cflags_cc":["-fPIC"],
-	      "defines": ["ANDROID"],
-	    }],
+        ['LUMIN=="true"', {
+          'defines': ['LUMIN'],
+        }],
+        ['OS=="android"', {
+          "cflags_cc":["-fPIC"],
+          "defines": ["ANDROID"],
+        }],
       ],
     }
   ]
