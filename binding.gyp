@@ -18,7 +18,7 @@
           ],
           'defines': ['HAVE_CONFIG_H'],
         }],
-        ['LUMIN=="true"', {
+        ['"<!(echo $LUMIN)"=="1"', {
           'defines': ['LUMIN'],
         }],
         ['OS=="android"', {
