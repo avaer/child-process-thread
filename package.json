@@ -5,8 +5,8 @@
   "main": "index.js",
   "dependencies": {
     "nan": "^2.10.0",
-    "raw-buffer": "0.0.18",
-    "smiggles": "0.0.27"
+    "raw-buffer": "0.0.19",
+    "smiggles": "0.0.28"
   },
   "devDependencies": {
     "window-fetch": "0.0.9"
