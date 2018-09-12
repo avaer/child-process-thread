@@ -150,12 +150,11 @@ inline int Start(
   }
 
   {
-#if _WIN32    
+#if _WIN32
     HMODULE handle = GetModuleHandle(nullptr);
     FARPROC address = GetProcAddress(handle, "?FLAG_allow_natives_syntax@internal@v8@@3_NA");
-
 #else
-    void *handle = dlopen(NULL, RTLD_LAZY);      
+    void *handle = dlopen(NULL, RTLD_LAZY);
     void *address = dlsym(handle, "_ZN2v88internal25FLAG_allow_natives_syntaxE");
 #endif
     bool *flag = (bool *)address;
