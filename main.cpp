@@ -122,7 +122,7 @@ bool ShouldAbortOnUncaughtException(Isolate *isolate) {
 }
 void OnMessage(Local<Message> message, Local<Value> error) {
   Nan::HandleScope handleScope;
-  
+
   Thread *thread = Thread::getCurrentThread();
   Local<Object> global = thread->getThreadGlobal();
   Local<Object> processObj = Local<Object>::Cast(global->Get(JS_STR("process")));
@@ -148,7 +148,7 @@ inline int Start(
 
     thread->setThreadGlobal(global);
   }
-  
+
   {
 #if _WIN32    
     HMODULE handle = GetModuleHandle(nullptr);
@@ -178,7 +178,7 @@ inline int Start(
     Local<Object> asyncObj = Nan::New<Object>();
     AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "asyncResource");
     Local<Function> asyncFunction = Nan::New<Function>(nop);
-    
+
     /* const char* path = argc > 1 ? argv[1] : nullptr;
     StartInspector(&env, path, debug_options);
 
@@ -217,7 +217,7 @@ inline int Start(
           HandleScope handle_scope(isolate);
           asyncResource.MakeCallback(asyncFunction, 0, nullptr);
         }
-        
+
         // EmitBeforeExit(env);
 
         // Emit `beforeExit` if the loop became alive either after emitting
@@ -335,7 +335,7 @@ static void *threadFn(void *arg) {
   char *jsPathArg = argsString + i;
   strncpy(jsPathArg, thread->getJsPath().c_str(), sizeof(argsString) - i);
   i += thread->getJsPath().length() + 1;
-  
+
   char *allowNativesSynax = argsString + i;
   strncpy(allowNativesSynax, "--allow_natives_syntax", sizeof(argsString) - i);
   i += strlen(allowNativesSynax) + 1;
@@ -653,11 +653,11 @@ NAN_METHOD(Thread::Terminate) {
 
   // clean up remote message handles
   uv_walk(&thread->getLoop(), walkHandleCleanupFn, nullptr);
-  
+
   // clean up local thread references
   Thread::removeThreadByKey((uintptr_t)messageAsyncOut);
   thread->removeThreadObject();
-  
+
   info.GetReturnValue().Set(Nan::New<Integer>(result == 0 ? (*(int *)retval) : 1));
 }
 NAN_METHOD(Thread::Cancel) {
@@ -688,26 +688,26 @@ NAN_METHOD(Thread::Cancel) {
 }
 NAN_METHOD(Thread::RequireNative) {
   Thread *thread = Thread::getCurrentThread();
-  
+
   Local<String> requireNameValue = info[0]->ToString();
   String::Utf8Value requireNameUtf8(requireNameValue);
   string requireName(*requireNameUtf8, requireNameUtf8.length());
-  
+
   const vector<pair<string, uintptr_t>> &requires = Thread::getNativeRequires();
   for (size_t i = 0; i < requires.size(); i++) {
     const pair<string, uintptr_t> &require = requires[i];
     const string &name = require.first;
     const uintptr_t address = require.second;
-    
+
     if (name == requireName) {
       void (*Init)(Handle<Object> exports) = (void (*)(Handle<Object>))address;
       Local<Object> exportsObj = Nan::New<Object>();
       Init(exportsObj);
-      
+
       return info.GetReturnValue().Set(exportsObj);
     }
   }
-  
+
   return Nan::ThrowError("Native module not found");
 }
 NAN_METHOD(Thread::PostThreadMessageIn) {
