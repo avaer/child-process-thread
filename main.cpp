@@ -10,8 +10,10 @@
 #include <pthread.h>
 #endif
 
+#include <unistd.h>
 #include <memory>
 #include <map>
+#include <thread>
 
 #if _WIN32
 #include <Windows.h>
@@ -28,6 +30,8 @@ using namespace std;
 #define JS_NUM(val) Nan::New<v8::Number>(val)
 #define JS_FLOAT(val) Nan::New<v8::Number>(val)
 #define JS_BOOL(val) Nan::New<v8::Boolean>(val)
+
+#define STDIO_BUF_SIZE 4096
 
 namespace childProcessThread {
 
@@ -743,11 +747,123 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
     return Nan::ThrowError("invalid arguments");
   }
 }
+
+NAN_METHOD(SpawnSync) {
+  if (info[0]->IsArray()) {
+    // collect arguments
+    Local<Array> array = Local<Array>::Cast(info[0]);
+
+    char *argv[64];
+    size_t argc = array->Length();
+
+    std::string argvString;
+    std::vector<int> lengths;
+
+    for (size_t i = 0; i < argc; i++) {
+      Local<String> value = array->Get(i)->ToString();
+      String::Utf8Value utf8Value(value);
+
+      argvString += std::string(*utf8Value, utf8Value.length() + 1); // include '\0'
+      lengths.push_back(utf8Value.length() + 1);
+    }
+
+    int argStartIndex = 0;
+    for (size_t i = 0; i < argc; i++) {
+      argv[i] = (char *)argvString.c_str() + argStartIndex;
+      argStartIndex += lengths[i];
+    }
+    
+    // set up fork
+    
+#if _WIN32
+    HMODULE handle = GetModuleHandle(nullptr);
+    FARPROC address = GetProcAddress(handle, "?Start@node@@YAHHQEAPEAD@Z");
+#else
+    void *handle = dlopen(NULL, RTLD_LAZY);
+    void *address = dlsym(handle, "_ZN4node5StartEiPPc");
+#endif
+    int (*nodeStart)(int argc, char* argv[]) = (int (*)(int argc, char* argv[]))address;
+
+    int stdoutfds[2];
+    int stderrfds[2];
+
+    pipe(stdoutfds);
+    pipe(stderrfds);
+
+    // fork
+    
+    int pid = fork();
+    if (pid != 0) { // parent
+      close(stdoutfds[1]);
+      close(stderrfds[1]);
+
+      std::vector<std::string> stdoutBuf;
+      std::vector<std::string> stderrBuf;
+
+      std::thread stdoutThread([&]() -> void {
+        int fd = stdoutfds[0];
+
+        char buf[STDIO_BUF_SIZE + 1];
+        for (;;) {
+          ssize_t size = read(fd, buf, STDIO_BUF_SIZE);
+          if (size > 0) {
+            stdoutBuf += std::string(buf, size);
+          } else {
+            break;
+          }
+        }
+      });
+      std::thread stderrThread([&]() -> void {
+        int fd = stderrfds[0];
+
+        char buf[STDIO_BUF_SIZE + 1];
+        for (;;) {
+          ssize_t size = read(fd, buf, STDIO_BUF_SIZE);
+          if (size > 0) {
+            stderrBuf += std::string(buf, size);
+          } else {
+            break;
+          }
+        }
+      });
+
+      stdoutThread.join();
+      stderrThread.join();
+
+      int status = wait(pid);
+      
+      Local<Object> result = Nan::New<Object>();
+      result->Set(JS_STR("status"), JS_INT(status));
+      result->Set(JS_STR("stdout"), JS_STR(stdoutBuf));
+      result->Set(JS_STR("stderr"), JS_STR(stderrBuf));
+      
+      return info.GetReturnValue().Set(result);
+    } else { // child
+      dup2(stdoutfds[1], 1);
+      close(stdoutfds[0]);
+      dup2(stderrfds[1], 2);
+      close(stderrfds[0]);
+
+      int status = nodeStart(argc, argv);
+      
+      close(stdoutfds[1]);
+      close(stderrfds[1]);
+      
+      exit(status);
+      
+      return; // can't happen
+    }
+  } else {
+    return Nan::ThrowError("invalid arguments");
+  }
+}
+
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
   uv_key_set(&threadKey, nullptr);
 
   exports->Set(JS_STR("Thread"), Thread::Initialize());
+  exports->Set(JS_STR("spawnSync"), Nan::New<Function>(SpawnSync));
 }
 string Thread::childJsPath;
 map<uintptr_t, Thread*> Thread::threadMap;
