@@ -746,6 +746,7 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
 }
 
 NAN_METHOD(SpawnSync) {
+#ifndef _WIN32
   if (info[0]->IsArray()) {
     // collect arguments
     Local<Array> array = Local<Array>::Cast(info[0]);
@@ -772,7 +773,7 @@ NAN_METHOD(SpawnSync) {
     
     // set up fork
     
-// #if _WIN32
+/* #if _WIN32 */
     HMODULE handle = GetModuleHandle(nullptr);
     FARPROC address = GetProcAddress(handle, "?Start@node@@YAHHQEAPEAD@Z");
 /* #else
@@ -859,6 +860,9 @@ NAN_METHOD(SpawnSync) {
   } else {
     return Nan::ThrowError("invalid arguments");
   }
+#else
+  return Nan::ThrowError("ENOTIMPL: platform not supported");
+#endif
 }
 
 void Init(Handle<Object> exports) {
