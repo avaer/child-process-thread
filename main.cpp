@@ -3,7 +3,6 @@
 #include <node.h>
 #include <uv.h>
 
-#include <sys/wait.h>
 #include <memory>
 #include <map>
 #include <thread>
