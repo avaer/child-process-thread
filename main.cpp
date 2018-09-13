@@ -3,22 +3,19 @@
 #include <node.h>
 #include <uv.h>
 
-#if _WIN32
-#include "deps/pthread-win32/config.h"
-#include "deps/pthread-win32/pthread.h"
-#else
-#include <pthread.h>
-#endif
-
-#include <unistd.h>
+#include <sys/wait.h>
 #include <memory>
 #include <map>
 #include <thread>
 
 #if _WIN32
 #include <Windows.h>
+#include "deps/pthread-win32/config.h"
+#include "deps/pthread-win32/pthread.h"
 #else
+#include <unistd.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #endif
 
 using namespace v8;
