@@ -797,8 +797,8 @@ NAN_METHOD(SpawnSync) {
       close(stdoutfds[1]);
       close(stderrfds[1]);
 
-      std::vector<std::string> stdoutBuf;
-      std::vector<std::string> stderrBuf;
+      std::string stdoutBuf;
+      std::string stderrBuf;
 
       std::thread stdoutThread([&]() -> void {
         int fd = stdoutfds[0];
