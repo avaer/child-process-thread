@@ -14,6 +14,7 @@
 #include "deps/pthread-win32/pthread.h"
 #else
 #include <unistd.h>
+#include <sys/wait.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #endif
