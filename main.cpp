@@ -865,12 +865,21 @@ NAN_METHOD(SpawnSync) {
 #endif
 }
 
+void InitFunction(Handle<Object> exports) {
+  exports->Set(JS_STR("Thread"), Thread::Initialize());
+  exports->Set(JS_STR("spawnSync"), Nan::New<Function>(SpawnSync));
+
+  uintptr_t initFunctionAddress = (uintptr_t)InitFunction;
+  Local<Array> initFunctionAddressArray = Nan::New<Array>(2);
+  initFunctionAddressArray->Set(0, Nan::New<Integer>((uint32_t)(initFunctionAddress >> 32)));
+  initFunctionAddressArray->Set(1, Nan::New<Integer>((uint32_t)(initFunctionAddress & 0xFFFFFFFF)));
+  exports->Set(JS_STR("initFunctionAddress"), initFunctionAddressArray);
+}
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
   uv_key_set(&threadKey, nullptr);
 
-  exports->Set(JS_STR("Thread"), Thread::Initialize());
-  exports->Set(JS_STR("spawnSync"), Nan::New<Function>(SpawnSync));
+  InitFunction(exports);
 }
 string Thread::childJsPath;
 map<uintptr_t, Thread*> Thread::threadMap;
