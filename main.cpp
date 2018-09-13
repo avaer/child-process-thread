@@ -772,13 +772,13 @@ NAN_METHOD(SpawnSync) {
     
     // set up fork
     
-#if _WIN32
+// #if _WIN32
     HMODULE handle = GetModuleHandle(nullptr);
     FARPROC address = GetProcAddress(handle, "?Start@node@@YAHHQEAPEAD@Z");
-#else
+/* #else
     void *handle = dlopen(NULL, RTLD_LAZY);
     void *address = dlsym(handle, "_ZN4node5StartEiPPc");
-#endif
+#endif */
     int (*nodeStart)(int argc, char* argv[]) = (int (*)(int argc, char* argv[]))address;
 
     int stdoutfds[2];
