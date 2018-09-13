@@ -827,7 +827,13 @@ NAN_METHOD(SpawnSync) {
       stdoutThread.join();
       stderrThread.join();
 
-      int status = wait(pid);
+      int status;
+      for(;;) {
+        int localPid = wait(&status);
+        if (localPid == pid) {
+          break;
+        }
+      }
       
       Local<Object> result = Nan::New<Object>();
       result->Set(JS_STR("status"), JS_INT(status));
