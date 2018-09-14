@@ -4,11 +4,9 @@
       'target_name': 'child_process_thread',
       'sources': [
         'src/main.cpp',
-        'src/vm.cpp',
       ],
       'include_dirs': [
         "<!(node -e \"require('nan')\")",
-        "src",
       ],
       'conditions': [
         ['OS=="win"', {
