@@ -747,19 +747,25 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
 
 NAN_METHOD(SpawnSync) {
 #ifndef _WIN32
-  if (info[0]->IsArray()) {
+  if (info[0]->IsString() && info[1]->IsArray()) {
     // collect arguments
-    Local<Array> array = Local<Array>::Cast(info[0]);
+    Local<String> argv0String = Local<String>::Cast(info[0]);
+    Local<Array> array = Local<Array>::Cast(info[1]);
 
     char *argv[64];
-    size_t argc = array->Length();
+    size_t argc = array->Length() + 1;
 
     std::string argvString;
     std::vector<int> lengths;
 
-    for (size_t i = 0; i < argc; i++) {
-      Local<String> value = array->Get(i)->ToString();
-      String::Utf8Value utf8Value(value);
+    {
+      String::Utf8Value utf8Value(argv0String);
+
+      argvString += std::string(*utf8Value, utf8Value.length() + 1); // include '\0'
+      lengths.push_back(utf8Value.length() + 1);
+    }
+    for (size_t i = 0; i < array->Length(); i++) {
+      String::Utf8Value utf8Value(array->Get(i)->ToString());
 
       argvString += std::string(*utf8Value, utf8Value.length() + 1); // include '\0'
       lengths.push_back(utf8Value.length() + 1);
