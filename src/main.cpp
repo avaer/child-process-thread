@@ -3,20 +3,19 @@
 #include <node.h>
 #include <uv.h>
 
-#if _WIN32
-#include "deps/pthread-win32/config.h"
-#include "deps/pthread-win32/pthread.h"
-#else
-#include <pthread.h>
-#endif
-
 #include <memory>
 #include <map>
+#include <thread>
 
 #if _WIN32
 #include <Windows.h>
+#include "deps/pthread-win32/config.h"
+#include "deps/pthread-win32/pthread.h"
 #else
+#include <unistd.h>
+#include <sys/wait.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #endif
 
 using namespace v8;
@@ -28,6 +27,8 @@ using namespace std;
 #define JS_NUM(val) Nan::New<v8::Number>(val)
 #define JS_FLOAT(val) Nan::New<v8::Number>(val)
 #define JS_BOOL(val) Nan::New<v8::Boolean>(val)
+
+#define STDIO_BUF_SIZE 4096
 
 namespace childProcessThread {
 
@@ -122,7 +123,7 @@ bool ShouldAbortOnUncaughtException(Isolate *isolate) {
 }
 void OnMessage(Local<Message> message, Local<Value> error) {
   Nan::HandleScope handleScope;
-  
+
   Thread *thread = Thread::getCurrentThread();
   Local<Object> global = thread->getThreadGlobal();
   Local<Object> processObj = Local<Object>::Cast(global->Get(JS_STR("process")));
@@ -148,14 +149,13 @@ inline int Start(
 
     thread->setThreadGlobal(global);
   }
-  
+
   {
-#if _WIN32    
+#if _WIN32
     HMODULE handle = GetModuleHandle(nullptr);
     FARPROC address = GetProcAddress(handle, "?FLAG_allow_natives_syntax@internal@v8@@3_NA");
-
 #else
-    void *handle = dlopen(NULL, RTLD_LAZY);      
+    void *handle = dlopen(NULL, RTLD_LAZY);
     void *address = dlsym(handle, "_ZN2v88internal25FLAG_allow_natives_syntaxE");
 #endif
     bool *flag = (bool *)address;
@@ -178,7 +178,7 @@ inline int Start(
     Local<Object> asyncObj = Nan::New<Object>();
     AsyncResource asyncResource(Isolate::GetCurrent(), asyncObj, "asyncResource");
     Local<Function> asyncFunction = Nan::New<Function>(nop);
-    
+
     /* const char* path = argc > 1 ? argv[1] : nullptr;
     StartInspector(&env, path, debug_options);
 
@@ -217,7 +217,7 @@ inline int Start(
           HandleScope handle_scope(isolate);
           asyncResource.MakeCallback(asyncFunction, 0, nullptr);
         }
-        
+
         // EmitBeforeExit(env);
 
         // Emit `beforeExit` if the loop became alive either after emitting
@@ -335,7 +335,7 @@ static void *threadFn(void *arg) {
   char *jsPathArg = argsString + i;
   strncpy(jsPathArg, thread->getJsPath().c_str(), sizeof(argsString) - i);
   i += thread->getJsPath().length() + 1;
-  
+
   char *allowNativesSynax = argsString + i;
   strncpy(allowNativesSynax, "--allow_natives_syntax", sizeof(argsString) - i);
   i += strlen(allowNativesSynax) + 1;
@@ -653,11 +653,11 @@ NAN_METHOD(Thread::Terminate) {
 
   // clean up remote message handles
   uv_walk(&thread->getLoop(), walkHandleCleanupFn, nullptr);
-  
+
   // clean up local thread references
   Thread::removeThreadByKey((uintptr_t)messageAsyncOut);
   thread->removeThreadObject();
-  
+
   info.GetReturnValue().Set(Nan::New<Integer>(result == 0 ? (*(int *)retval) : 1));
 }
 NAN_METHOD(Thread::Cancel) {
@@ -688,26 +688,26 @@ NAN_METHOD(Thread::Cancel) {
 }
 NAN_METHOD(Thread::RequireNative) {
   Thread *thread = Thread::getCurrentThread();
-  
+
   Local<String> requireNameValue = info[0]->ToString();
   String::Utf8Value requireNameUtf8(requireNameValue);
   string requireName(*requireNameUtf8, requireNameUtf8.length());
-  
+
   const vector<pair<string, uintptr_t>> &requires = Thread::getNativeRequires();
   for (size_t i = 0; i < requires.size(); i++) {
     const pair<string, uintptr_t> &require = requires[i];
     const string &name = require.first;
     const uintptr_t address = require.second;
-    
+
     if (name == requireName) {
       void (*Init)(Handle<Object> exports) = (void (*)(Handle<Object>))address;
       Local<Object> exportsObj = Nan::New<Object>();
       Init(exportsObj);
-      
+
       return info.GetReturnValue().Set(exportsObj);
     }
   }
-  
+
   return Nan::ThrowError("Native module not found");
 }
 NAN_METHOD(Thread::PostThreadMessageIn) {
@@ -744,11 +744,82 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
     return Nan::ThrowError("invalid arguments");
   }
 }
+
+uv_sem_t sem;
+bool locked;
+
+void SemCb(const FunctionCallbackInfo<Value> &info) {
+  Isolate *isolate = Isolate::GetCurrent();
+
+  HandleScope scope(isolate);
+
+  isolate->Exit();
+  locked = false;
+  uv_sem_post(&sem);
+}
+
+NAN_METHOD(Await) {
+  if (info[0]->IsFunction()) {
+    Local<Function> fn = Local<Function>::Cast(info[0]);
+
+    Thread *thread = Thread::getCurrentThread();
+
+    Isolate *isolate = Isolate::GetCurrent();
+    Local<Context> context = isolate->GetEnteredContext();
+
+    locked = true;
+    context->Exit();
+    isolate->Exit();
+
+    std::thread t([&]() -> void {
+      v8::Locker lock(isolate);
+
+      isolate->Enter();
+
+      HandleScope scope(isolate);
+
+      Context::Scope contextScope(context);
+
+      Local<Function> cb = Function::New(isolate, SemCb);
+      Local<Value> argv[] = {
+        cb,
+      };
+      fn->Call(Nan::Null(), sizeof(argv)/sizeof(argv[0]), argv);
+
+      while (locked) {
+        uv_run(&thread->getLoop(), UV_RUN_ONCE);
+      }
+    });
+    t.detach();
+
+    {
+      v8::Unlocker unlock(isolate);
+      uv_sem_wait(&sem);
+    }
+    isolate->Enter();
+    context->Enter();
+  } else {
+    return Nan::ThrowError("invalid arguments");
+  }
+}
+
+void InitFunction(Handle<Object> exports) {
+  exports->Set(JS_STR("Thread"), Thread::Initialize());
+  exports->Set(JS_STR("await"), Nan::New<Function>(Await));
+
+  uintptr_t initFunctionAddress = (uintptr_t)InitFunction;
+  Local<Array> initFunctionAddressArray = Nan::New<Array>(2);
+  initFunctionAddressArray->Set(0, Nan::New<Integer>((uint32_t)(initFunctionAddress >> 32)));
+  initFunctionAddressArray->Set(1, Nan::New<Integer>((uint32_t)(initFunctionAddress & 0xFFFFFFFF)));
+  exports->Set(JS_STR("initFunctionAddress"), initFunctionAddressArray);
+}
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
   uv_key_set(&threadKey, nullptr);
 
-  exports->Set(JS_STR("Thread"), Thread::Initialize());
+  uv_sem_init(&sem, 0);
+
+  InitFunction(exports);
 }
 string Thread::childJsPath;
 map<uintptr_t, Thread*> Thread::threadMap;

@@ -1,5 +1,5 @@
 const path = require('path');
-const {Thread} = require(path.join(__dirname, 'build', 'Release', 'child_process_thread.node'));
+const {Thread, initFunctionAddress} = require(path.join(__dirname, 'build', 'Release', 'child_process_thread.node'));
 const RawBuffer = require('raw-buffer');
 const smiggles = require('smiggles');
 const MessageEvent = require('./message-event');
@@ -38,6 +38,7 @@ const rawBufferSymbol = Symbol();
 
 Thread.setChildJsPath(path.join(__dirname, 'child.js'));
 Thread.setNativeRequire('RawBuffer', RawBuffer.initFunctionAddress);
+Thread.setNativeRequire('ChildProcessThread', initFunctionAddress);
 Thread.prototype.postMessage = function(m, transferList, arrayBuffer) {
   arrayBuffer = smiggles.serialize(m, transferList, arrayBuffer);
   new RawBuffer(arrayBuffer).toAddress(); // externalize
