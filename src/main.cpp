@@ -745,135 +745,48 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
   }
 }
 
-NAN_METHOD(SpawnSync) {
-#ifndef _WIN32
-  if (info[0]->IsString() && info[1]->IsArray()) {
-    // collect arguments
-    Local<String> argv0String = Local<String>::Cast(info[0]);
-    Local<Array> array = Local<Array>::Cast(info[1]);
+uv_sem_t sem;
+bool locked;
 
-    char *argv[64];
-    size_t argc = array->Length() + 1;
+NAN_METHOD(SemCb) {
+  locked = false;
+  uv_sem_post(&sem);
+}
 
-    std::string argvString;
-    std::vector<int> lengths;
+NAN_METHOD(Await) {
+  if (info[0]->IsFunction()) {
+    Local<Function> fn = Local<Function>::Cast(info[0]);
+
+    Isolate *isolate = Isolate::GetCurrent();
+    Thread *thread = Thread::getCurrentThread();
+
+    locked = true;
+
+    std::thread t([&]() -> void {
+      v8::Locker lock(isolate);
+      Nan::HandleScope scope;
+
+      Local<Function> cb = Nan::New<Function>(SemCb);
+      fn->Call(cb, 0, nullptr);
+
+      while (locked) {
+        uv_run(&thread->getLoop(), UV_RUN_DEFAULT);
+      }
+    });
+    t.detach();
 
     {
-      String::Utf8Value utf8Value(argv0String);
-
-      argvString += std::string(*utf8Value, utf8Value.length() + 1); // include '\0'
-      lengths.push_back(utf8Value.length() + 1);
-    }
-    for (size_t i = 0; i < array->Length(); i++) {
-      String::Utf8Value utf8Value(array->Get(i)->ToString());
-
-      argvString += std::string(*utf8Value, utf8Value.length() + 1); // include '\0'
-      lengths.push_back(utf8Value.length() + 1);
-    }
-
-    int argStartIndex = 0;
-    for (size_t i = 0; i < argc; i++) {
-      argv[i] = (char *)argvString.c_str() + argStartIndex;
-      argStartIndex += lengths[i];
-    }
-    
-    // set up fork
-    
-/* #if _WIN32
-    HMODULE handle = GetModuleHandle(nullptr);
-    FARPROC address = GetProcAddress(handle, "?Start@node@@YAHHQEAPEAD@Z");
-#else */
-    void *handle = dlopen(NULL, RTLD_LAZY);
-    void *address = dlsym(handle, "_ZN4node5StartEiPPc");
-/* #endif */
-    int (*nodeStart)(int argc, char* argv[]) = (int (*)(int argc, char* argv[]))address;
-
-    int stdoutfds[2];
-    int stderrfds[2];
-
-    pipe(stdoutfds);
-    pipe(stderrfds);
-
-    // fork
-    
-    int pid = fork();
-    if (pid != 0) { // parent
-      close(stdoutfds[1]);
-      close(stderrfds[1]);
-
-      std::string stdoutBuf;
-      std::string stderrBuf;
-
-      std::thread stdoutThread([&]() -> void {
-        int fd = stdoutfds[0];
-
-        char buf[STDIO_BUF_SIZE + 1];
-        for (;;) {
-          ssize_t size = read(fd, buf, STDIO_BUF_SIZE);
-          if (size > 0) {
-            stdoutBuf += std::string(buf, size);
-          } else {
-            break;
-          }
-        }
-      });
-      std::thread stderrThread([&]() -> void {
-        int fd = stderrfds[0];
-
-        char buf[STDIO_BUF_SIZE + 1];
-        for (;;) {
-          ssize_t size = read(fd, buf, STDIO_BUF_SIZE);
-          if (size > 0) {
-            stderrBuf += std::string(buf, size);
-          } else {
-            break;
-          }
-        }
-      });
-
-      stdoutThread.join();
-      stderrThread.join();
-
-      int status;
-      for(;;) {
-        int localPid = wait(&status);
-        if (localPid == pid) {
-          break;
-        }
-      }
-      
-      Local<Object> result = Nan::New<Object>();
-      result->Set(JS_STR("status"), JS_INT(status));
-      result->Set(JS_STR("stdout"), JS_STR(stdoutBuf));
-      result->Set(JS_STR("stderr"), JS_STR(stderrBuf));
-      
-      return info.GetReturnValue().Set(result);
-    } else { // child
-      dup2(stdoutfds[1], 1);
-      close(stdoutfds[0]);
-      dup2(stderrfds[1], 2);
-      close(stderrfds[0]);
-
-      int status = nodeStart(argc, argv);
-      
-      close(stdoutfds[1]);
-      close(stderrfds[1]);
-      
-      exit(status);
-      
-      return; // can't happen
+      v8::Unlocker unlock(isolate);
+      uv_sem_wait(&sem);
     }
   } else {
     return Nan::ThrowError("invalid arguments");
   }
-#else
-  return Nan::ThrowError("ENOTIMPL: platform not supported");
-#endif
 }
 
 void InitFunction(Handle<Object> exports) {
   exports->Set(JS_STR("Thread"), Thread::Initialize());
-  exports->Set(JS_STR("spawnSync"), Nan::New<Function>(SpawnSync));
+  exports->Set(JS_STR("await"), Nan::New<Function>(Await));
 
   uintptr_t initFunctionAddress = (uintptr_t)InitFunction;
   Local<Array> initFunctionAddressArray = Nan::New<Array>(2);
@@ -884,6 +797,8 @@ void InitFunction(Handle<Object> exports) {
 void Init(Handle<Object> exports) {
   uv_key_create(&threadKey);
   uv_key_set(&threadKey, nullptr);
+
+  uv_sem_init(&sem, 0);
 
   InitFunction(exports);
 }
