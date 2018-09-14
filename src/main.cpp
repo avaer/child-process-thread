@@ -748,7 +748,12 @@ NAN_METHOD(Thread::PostThreadMessageOut) {
 uv_sem_t sem;
 bool locked;
 
-NAN_METHOD(SemCb) {
+void SemCb(const FunctionCallbackInfo<Value> &info) {
+  Isolate *isolate = Isolate::GetCurrent();
+
+  HandleScope scope(isolate);
+
+  isolate->Exit();
   locked = false;
   uv_sem_post(&sem);
 }
@@ -757,20 +762,32 @@ NAN_METHOD(Await) {
   if (info[0]->IsFunction()) {
     Local<Function> fn = Local<Function>::Cast(info[0]);
 
-    Isolate *isolate = Isolate::GetCurrent();
     Thread *thread = Thread::getCurrentThread();
 
+    Isolate *isolate = Isolate::GetCurrent();
+    Local<Context> context = isolate->GetEnteredContext();
+
     locked = true;
+    context->Exit();
+    isolate->Exit();
 
     std::thread t([&]() -> void {
       v8::Locker lock(isolate);
-      Nan::HandleScope scope;
 
-      Local<Function> cb = Nan::New<Function>(SemCb);
-      fn->Call(cb, 0, nullptr);
+      isolate->Enter();
+
+      HandleScope scope(isolate);
+
+      Context::Scope contextScope(context);
+
+      Local<Function> cb = Function::New(isolate, SemCb);
+      Local<Value> argv[] = {
+        cb,
+      };
+      fn->Call(Nan::Null(), sizeof(argv)/sizeof(argv[0]), argv);
 
       while (locked) {
-        uv_run(&thread->getLoop(), UV_RUN_DEFAULT);
+        uv_run(&thread->getLoop(), UV_RUN_ONCE);
       }
     });
     t.detach();
@@ -779,6 +796,8 @@ NAN_METHOD(Await) {
       v8::Unlocker unlock(isolate);
       uv_sem_wait(&sem);
     }
+    isolate->Enter();
+    context->Enter();
   } else {
     return Nan::ThrowError("invalid arguments");
   }
