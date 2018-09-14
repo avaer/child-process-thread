@@ -18,6 +18,8 @@
 #include <pthread.h>
 #endif
 
+#include "vm.h"
+
 using namespace v8;
 using namespace node;
 using namespace std;
