@@ -9,8 +9,8 @@
 
 #if _WIN32
 #include <Windows.h>
-#include "deps/pthread-win32/config.h"
-#include "deps/pthread-win32/pthread.h"
+#include "../deps/pthread-win32/config.h"
+#include "../deps/pthread-win32/pthread.h"
 #else
 #include <unistd.h>
 #include <sys/wait.h>
