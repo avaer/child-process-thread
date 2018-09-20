@@ -121,7 +121,7 @@ private:
 bool ShouldAbortOnUncaughtException(Isolate *isolate) {
   return false;
 }
-void OnMessage(Local<Message> message, Local<Value> error) {
+/* void OnMessage(Local<Message> message, Local<Value> error) {
   Nan::HandleScope handleScope;
 
   Thread *thread = Thread::getCurrentThread();
@@ -129,7 +129,7 @@ void OnMessage(Local<Message> message, Local<Value> error) {
   Local<Object> processObj = Local<Object>::Cast(global->Get(JS_STR("process")));
   Local<Function> fatalExceptionFn = Local<Function>::Cast(processObj->Get(JS_STR("_fatalException")));
   fatalExceptionFn->Call(processObj, 1, &error);
-}
+} */
 
 inline int Start(
   Thread *thread, Isolate *isolate, IsolateData *isolate_data,
@@ -263,7 +263,7 @@ inline int Start(Thread *thread,
   if (isolate == nullptr)
     return 12;  // Signal internal error.
 
-  isolate->AddMessageListener(OnMessage);
+  // isolate->AddMessageListener(OnMessage);
   isolate->SetAbortOnUncaughtExceptionCallback(ShouldAbortOnUncaughtException);
   // isolate->SetAutorunMicrotasks(false);
   // isolate->SetFatalErrorHandler(OnFatalError);
@@ -758,54 +758,14 @@ void SemCb(const FunctionCallbackInfo<Value> &info) {
   uv_sem_post(&sem);
 }
 
-NAN_METHOD(Await) {
-  if (info[0]->IsFunction()) {
-    Local<Function> fn = Local<Function>::Cast(info[0]);
-
-    Thread *thread = Thread::getCurrentThread();
-
-    Isolate *isolate = Isolate::GetCurrent();
-    Local<Context> context = isolate->GetEnteredContext();
-
-    locked = true;
-    context->Exit();
-    isolate->Exit();
-
-    std::thread t([&]() -> void {
-      v8::Locker lock(isolate);
-
-      isolate->Enter();
-
-      HandleScope scope(isolate);
-
-      Context::Scope contextScope(context);
-
-      Local<Function> cb = Function::New(isolate, SemCb);
-      Local<Value> argv[] = {
-        cb,
-      };
-      fn->Call(Nan::Null(), sizeof(argv)/sizeof(argv[0]), argv);
-
-      while (locked) {
-        uv_run(&thread->getLoop(), UV_RUN_ONCE);
-      }
-    });
-    t.detach();
-
-    {
-      v8::Unlocker unlock(isolate);
-      uv_sem_wait(&sem);
-    }
-    isolate->Enter();
-    context->Enter();
-  } else {
-    return Nan::ThrowError("invalid arguments");
-  }
+NAN_METHOD(Run) {
+  Thread *thread = Thread::getCurrentThread();
+  uv_run(&thread->getLoop(), UV_RUN_ONCE);
 }
 
 void InitFunction(Handle<Object> exports) {
   exports->Set(JS_STR("Thread"), Thread::Initialize());
-  exports->Set(JS_STR("await"), Nan::New<Function>(Await));
+  exports->Set(JS_STR("run"), Nan::New<Function>(Run));
 
   uintptr_t initFunctionAddress = (uintptr_t)InitFunction;
   Local<Array> initFunctionAddressArray = Nan::New<Array>(2);
