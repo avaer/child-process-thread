@@ -1,5 +1,5 @@
 const path = require('path');
-const {Thread, initFunctionAddress} = require(path.join(__dirname, 'build', 'Release', 'child_process_thread.node'));
+const {Thread, pipe, initFunctionAddress} = require(path.join(__dirname, 'build', 'Release', 'child_process_thread.node'));
 const RawBuffer = require('raw-buffer');
 const smiggles = require('smiggles');
 const MessageEvent = require('./message-event');
@@ -63,6 +63,7 @@ Thread.prototype.onthreadmessage = function(arrayBuffer) {
     }
   }
 };
+Thread.pipe = pipe;
 Thread.bind = smiggles.bind;
 
 module.exports = Thread;
