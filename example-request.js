@@ -39,9 +39,11 @@ const createHandler = fds => {
         const b1 = b.slice(0, length);
         const b2 = b.slice(length);
 
-        const fnString = b1.toString('utf8');
+        const s = b1.toString('utf8');
+        const j = JSON.parse(s);
+        const {fn: fnString, arg} = j;
         const fn = eval(fnString);
-        fn(result => {
+        fn(arg, result => {
           const b = Buffer.from(JSON.stringify(result), 'utf8');
           const bLength = Buffer.allocUnsafe(4);
           bLength.writeUInt32LE(b.length);

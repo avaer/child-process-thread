@@ -1,8 +1,8 @@
 const fs = require('fs');
 
-const createRequest = (fds, cb) => {
+const createRequest = (fds, cb, arg) => {
   {
-    const b = Buffer.from(cb.toString(), 'utf8');
+    const b = Buffer.from(JSON.stringify({fn: cb.toString(), arg}), 'utf8');
     const bLength = Buffer.allocUnsafe(4);
     bLength.writeUInt32LE(b.length);
     fs.writeSync(fds[1], bLength);
@@ -51,11 +51,11 @@ const createRequest = (fds, cb) => {
 onmessage = m => {
   console.log('got thread message', m.data);
   const fds = m.data;
-  const result = createRequest(fds, cb => {
+  const result = createRequest(fds, (x, cb) => {
     setTimeout(() => {
-      console.log('tick');
+      console.log('tick', x);
       cb('ok');
     }, 1000);
-  });
+  }, 7);
   console.log('tock', result);
 };
