@@ -763,9 +763,20 @@ NAN_METHOD(Run) {
   uv_run(&thread->getLoop(), UV_RUN_ONCE);
 }
 
+NAN_METHOD(Pipe) {
+  int fds[2];
+  pipe(fds);
+
+  Local<Array> array = Nan::New<Array>(2);
+  array->Set(0, JS_NUM(fds[0]));
+  array->Set(1, JS_NUM(fds[1]));
+  info.GetReturnValue().Set(array);
+}
+
 void InitFunction(Handle<Object> exports) {
   exports->Set(JS_STR("Thread"), Thread::Initialize());
   exports->Set(JS_STR("run"), Nan::New<Function>(Run));
+  exports->Set(JS_STR("pipe"), Nan::New<Function>(Pipe));
 
   uintptr_t initFunctionAddress = (uintptr_t)InitFunction;
   Local<Array> initFunctionAddressArray = Nan::New<Array>(2);
