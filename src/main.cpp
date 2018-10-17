@@ -9,6 +9,7 @@
 
 #if _WIN32
 #include <Windows.h>
+#include <io.h>
 #include "../deps/pthread-win32/config.h"
 #include "../deps/pthread-win32/pthread.h"
 #else
@@ -765,7 +766,14 @@ NAN_METHOD(Run) {
 
 NAN_METHOD(Pipe) {
   int fds[2];
+#ifndef _WIN32
   pipe(fds);
+#else
+  HANDLE handles[2];
+  CreatePipe(&handles[0], &handles[1], nullptr, 0);
+  fds[0] = _open_osfhandle((intptr_t)(handles[0]), 0);
+  fds[1] = _open_osfhandle((intptr_t)(handles[1]), 0);
+#endif
 
   Local<Array> array = Nan::New<Array>(2);
   array->Set(0, JS_NUM(fds[0]));
