@@ -23,11 +23,18 @@ using namespace v8;
 using namespace node;
 using namespace std;
 
+#define JS_FN(x) (Nan::GetFunction(x).ToLocalChecked())
 #define JS_STR(...) Nan::New<v8::String>(__VA_ARGS__).ToLocalChecked()
 #define JS_INT(val) Nan::New<v8::Integer>(val)
 #define JS_NUM(val) Nan::New<v8::Number>(val)
 #define JS_FLOAT(val) Nan::New<v8::Number>(val)
 #define JS_BOOL(val) Nan::New<v8::Boolean>(val)
+
+#define TO_NUM(x) (Nan::To<double>(x).FromJust())
+#define TO_BOOL(x) (Nan::To<bool>(x).FromJust())
+#define TO_UINT32(x) (Nan::To<unsigned int>(x).FromJust())
+#define TO_INT32(x) (Nan::To<int>(x).FromJust())
+#define TO_FLOAT(x) (Nan::To<float>(x).FromJust())
 
 #define STDIO_BUF_SIZE 4096
 
@@ -55,7 +62,7 @@ public:
 
 class Thread : public Nan::ObjectWrap {
 public:
-  static Handle<Object> Initialize();
+  static Local<Object> Initialize();
   const string &getJsPath() const;
   pthread_t &getThread();
   uv_loop_t &getLoop();
@@ -373,7 +380,7 @@ void messageAsyncInCb(uv_async_t *handle) {
       Local<ArrayBuffer> message = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
 
       Local<Value> argv[] = {message};
-      onthreadmessageFn->Call(global, sizeof(argv)/sizeof(argv[0]), argv);
+      onthreadmessageFn->Call(v8::Isolate::GetCurrent()->GetCurrentContext(), global, sizeof(argv)/sizeof(argv[0]), argv);
     }
   }
 }
@@ -400,7 +407,7 @@ void messageAsyncOutCb(uv_async_t *handle) {
       Local<ArrayBuffer> message = ArrayBuffer::New(Isolate::GetCurrent(), data, size);
 
       Local<Value> argv[] = {message};
-      onthreadmessageFn->Call(threadObj, sizeof(argv)/sizeof(argv[0]), argv);
+      onthreadmessageFn->Call(v8::Isolate::GetCurrent()->GetCurrentContext(), threadObj, sizeof(argv)/sizeof(argv[0]), argv);
     }
   }
 }
@@ -413,7 +420,7 @@ void walkHandleCleanupFn(uv_handle_t *handle, void *arg) {
   }
 }
 
-Handle<Object> Thread::Initialize() {
+Local<Object> Thread::Initialize() {
   Nan::EscapableHandleScope scope;
 
   // constructor
@@ -424,7 +431,7 @@ Handle<Object> Thread::Initialize() {
   Nan::SetPrototypeMethod(ctor, "cancel", Thread::Cancel);
   Nan::SetPrototypeMethod(ctor, "postThreadMessage", Thread::PostThreadMessageIn);
 
-  Local<Function> ctorFn = ctor->GetFunction();
+  Local<Function> ctorFn = JS_FN(ctor);
 
   Local<Function> forkFn = Nan::New<Function>(Thread::Fork);
   ctorFn->Set(JS_STR("fork"), forkFn);
@@ -575,8 +582,8 @@ NAN_METHOD(Thread::New) {
   if (info[0]->IsString()) {
     Local<Object> rawThreadObj = info.This();
 
-    Local<String> jsPathValue = info[0]->ToString();
-    String::Utf8Value jsPathValueUtf8(jsPathValue);
+    Local<String> jsPathValue = Local<String>::Cast(info[0]);
+    Nan::Utf8String jsPathValueUtf8(jsPathValue);
     size_t length = jsPathValueUtf8.length();
     string jsPath(*jsPathValueUtf8, length);
 
@@ -605,7 +612,7 @@ NAN_METHOD(Thread::Fork) {
 NAN_METHOD(Thread::SetChildJsPath) {
   if (info[0]->IsString()) {
     Local<String> childJsPathValue = Local<String>::Cast(info[0]);
-    String::Utf8Value childJsPathValueUtf8(info[0]);
+    Nan::Utf8String childJsPathValueUtf8(info[0]);
     size_t length = childJsPathValueUtf8.length();
     string childJsPath(*childJsPathValueUtf8, length);
 
@@ -618,12 +625,12 @@ NAN_METHOD(Thread::SetNativeRequire) {
   Thread *thread = Thread::getCurrentThread();
 
   if (info[0]->IsString() && info[1]->IsArray()) {
-    Local<String> requireNameValue = info[0]->ToString();
-    String::Utf8Value requireNameUtf8(requireNameValue);
+    Local<String> requireNameValue = Local<String>::Cast(info[0]);
+    Nan::Utf8String requireNameUtf8(requireNameValue);
     string requireName(*requireNameUtf8, requireNameUtf8.length());
 
     Local<Array> requireAddressValue = Local<Array>::Cast(info[1]);
-    uintptr_t requireAddress = ((uint64_t)requireAddressValue->Get(0)->Uint32Value() << 32) | ((uint64_t)requireAddressValue->Get(1)->Uint32Value() & 0xFFFFFFFF);
+    uintptr_t requireAddress = ((uint64_t)TO_UINT32(requireAddressValue->Get(0)) << 32) | ((uint64_t)TO_UINT32(requireAddressValue->Get(1)) & 0xFFFFFFFF);
 
     if (requireAddress) {
       nativeRequires.emplace_back(requireName, requireAddress);
@@ -690,8 +697,8 @@ NAN_METHOD(Thread::Cancel) {
 NAN_METHOD(Thread::RequireNative) {
   Thread *thread = Thread::getCurrentThread();
 
-  Local<String> requireNameValue = info[0]->ToString();
-  String::Utf8Value requireNameUtf8(requireNameValue);
+  Local<String> requireNameValue = Local<String>::Cast(info[0]);
+  Nan::Utf8String requireNameUtf8(requireNameValue);
   string requireName(*requireNameUtf8, requireNameUtf8.length());
 
   const vector<pair<string, uintptr_t>> &requires = Thread::getNativeRequires();
@@ -701,7 +708,7 @@ NAN_METHOD(Thread::RequireNative) {
     const uintptr_t address = require.second;
 
     if (name == requireName) {
-      void (*Init)(Handle<Object> exports) = (void (*)(Handle<Object>))address;
+      void (*Init)(Local<Object> exports) = (void (*)(Local<Object>))address;
       Local<Object> exportsObj = Nan::New<Object>();
       Init(exportsObj);
 
@@ -781,7 +788,7 @@ NAN_METHOD(Pipe) {
   info.GetReturnValue().Set(array);
 }
 
-void InitFunction(Handle<Object> exports) {
+void InitFunction(Local<Object> exports) {
   exports->Set(JS_STR("Thread"), Thread::Initialize());
   exports->Set(JS_STR("run"), Nan::New<Function>(Run));
   exports->Set(JS_STR("pipe"), Nan::New<Function>(Pipe));
@@ -792,7 +799,7 @@ void InitFunction(Handle<Object> exports) {
   initFunctionAddressArray->Set(1, Nan::New<Integer>((uint32_t)(initFunctionAddress & 0xFFFFFFFF)));
   exports->Set(JS_STR("initFunctionAddress"), initFunctionAddressArray);
 }
-void Init(Handle<Object> exports) {
+void Init(Local<Object> exports) {
   uv_key_create(&threadKey);
   uv_key_set(&threadKey, nullptr);
 
